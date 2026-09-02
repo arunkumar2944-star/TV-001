@@ -1,0 +1,83 @@
+# ============================================================================
+#  Trichy Vision - internal news publishing management system
+# ============================================================================
+#  NO DATABASE SERVICE HERE ON PURPOSE.
+#  The application uses the EXISTING Supabase PostgreSQL database, reached
+#  through DATABASE_URL. Adding a postgres container would create a second,
+#  competing database.
+#
+#  n8n is also not defined here: the automation layer is hosted and managed
+#  separately (see N8N-INTEGRATION.md). Point N8N_WEBHOOK_URL at it.
+#
+#  Usage:
+#      cp backend/.env.example backend/.env     # then fill in real values
+#      docker compose up -d --build
+#      docker compose logs -f backend
+# ============================================================================
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: trichy-vision-api:latest
+    container_name: trichy-vision-api
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      # The UI is served from the same origin by nginx, so this is only used
+      # for CORS when something else calls the API directly.
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_LOCAL_DIR: /app/storage/uploads
+    volumes:
+      # Original media stays on the Trichy Vision server, outside the image.
+      - media:/app/storage/uploads
+    expose:
+      - "4000"
+    # Uncomment to reach the API directly during troubleshooting.
+    # ports:
+    #   - "127.0.0.1:4000:4000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: trichy-vision-ui:latest
+    container_name: trichy-vision-ui
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      # Put a TLS terminating reverse proxy in front of this in production.
+      - "${UI_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  media:
+    name: trichy_vision_media
