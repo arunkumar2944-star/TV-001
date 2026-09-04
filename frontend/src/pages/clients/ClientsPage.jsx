@@ -12,6 +12,9 @@ import {
 
 import { Button } from '../../components/Button.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
+import {
+  useAuth,
+} from '../../context/AuthContext.jsx';
 import { api } from '../../services/apiClient.js';
 
 import './client-list.css';
@@ -28,6 +31,22 @@ export default function ClientsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
+
+  const {
+    user: currentUser,
+  } = useAuth();
+
+  const currentUserRole =
+    String(
+      currentUser?.role ??
+      ''
+    )
+      .trim()
+      .toUpperCase();
+
+  const isClientAdmin =
+    currentUserRole ===
+    'CLIENT_ADMIN';
 
   const [clients, setClients] =
     useState([]);
@@ -286,7 +305,7 @@ export default function ClientsPage() {
       1,
       Math.ceil(
         pagination.total /
-          pagination.pageSize
+        pagination.pageSize
       )
     );
 
@@ -460,7 +479,7 @@ export default function ClientsPage() {
             pagination.total
           }
           description=
-            "Registered organizations"
+          "Registered organizations"
         />
 
         <SummaryCard
@@ -469,7 +488,7 @@ export default function ClientsPage() {
             filteredClients.length
           }
           description=
-            "Current search results"
+          "Current search results"
         />
 
         <SummaryCard
@@ -478,7 +497,7 @@ export default function ClientsPage() {
             activeOnPage
           }
           description=
-            "Active on this page"
+          "Active on this page"
         />
 
         <SummaryCard
@@ -487,7 +506,7 @@ export default function ClientsPage() {
             inactiveOnPage
           }
           description=
-            "Inactive on this page"
+          "Inactive on this page"
         />
       </section>
 
@@ -531,14 +550,14 @@ export default function ClientsPage() {
         {!loading &&
           !error &&
           filteredClients.length ===
-            0 && (
+          0 && (
             <EmptyClients
               hasFilters={
                 Boolean(
                   search.trim()
                 ) ||
                 statusFilter !==
-                  'ALL'
+                'ALL'
               }
               onCreate={() =>
                 navigate(
@@ -551,7 +570,7 @@ export default function ClientsPage() {
         {!loading &&
           !error &&
           filteredClients.length >
-            0 && (
+          0 && (
             <>
               <ClientsTable
                 clients={
@@ -568,6 +587,9 @@ export default function ClientsPage() {
                 }
                 clientSelection={
                   clientSelection
+                }
+                isClientAdmin={
+                  isClientAdmin
                 }
               />
 
@@ -755,6 +777,7 @@ function ClientsTable({
   onUsers,
   onSocialConnections,
   clientSelection,
+  isClientAdmin,
 }) {
   return (
     <div className="clients-table-wrapper">
@@ -799,6 +822,9 @@ function ClientsTable({
                 clientSelection={
                   clientSelection
                 }
+                isClientAdmin={
+                  isClientAdmin
+                }
               />
             )
           )}
@@ -816,6 +842,7 @@ function ClientRow({
   onUsers,
   onSocialConnections,
   clientSelection,
+  isClientAdmin,
 }) {
   const status =
     getClientStatus(client);
@@ -861,7 +888,7 @@ function ClientRow({
               }
               aria-busy={
                 thisClientOpening &&
-                clientSelection?.target ===
+                  clientSelection?.target ===
                   'view'
                   ? true
                   : undefined
@@ -966,7 +993,7 @@ function ClientRow({
             loading={
               thisClientOpening &&
               clientSelection?.target ===
-                'view'
+              'view'
             }
             disabled={
               anyClientOpening
@@ -986,7 +1013,7 @@ function ClientRow({
             loading={
               thisClientOpening &&
               clientSelection?.target ===
-                'users'
+              'users'
             }
             disabled={
               anyClientOpening
@@ -1000,25 +1027,27 @@ function ClientRow({
             Users
           </Button>
 
-          <Button
-            size="sm"
-            variant="ghost"
-            loading={
-              thisClientOpening &&
-              clientSelection?.target ===
+          {isClientAdmin && (
+            <Button
+              size="sm"
+              variant="ghost"
+              loading={
+                thisClientOpening &&
+                clientSelection?.target ===
                 'connections'
-            }
-            disabled={
-              anyClientOpening
-            }
-            onClick={() =>
-              onSocialConnections(
-                client.client_id
-              )
-            }
-          >
-            Connections
-          </Button>
+              }
+              disabled={
+                anyClientOpening
+              }
+              onClick={() =>
+                onSocialConnections(
+                  client.client_id
+                )
+              }
+            >
+              Connections
+            </Button>
+          )}
 
         </div>
       </td>
@@ -1201,7 +1230,7 @@ function ClientsLoading() {
     <div
       className="clients-loading"
       aria-label=
-        "Loading clients"
+      "Loading clients"
     >
       {[1, 2, 3, 4].map(
         (row) => (

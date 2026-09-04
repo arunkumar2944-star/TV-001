@@ -3,7 +3,7 @@
 const express = require('express');
 const asyncHandler = require('../utils/asyncHandler');
 const authController = require('../controllers/authController');
-const { authenticate } = require('../middleware/authenticate');
+const { authenticate,optionalAuthenticate } = require('../middleware/authenticate');
 const { validate } = require('../middleware/validate');
 const { loginLimiter } = require('../middleware/rateLimiters');
 const { loginSchema, changePasswordSchema } = require('../validators/authValidators');
@@ -16,7 +16,13 @@ const router = express.Router();
 router.get('/csrf', asyncHandler(authController.csrf));
 router.post('/login', loginLimiter, validate({ body: loginSchema }), asyncHandler(authController.login));
 router.post('/logout', authenticate, asyncHandler(authController.logout));
-router.get('/me', authenticate, asyncHandler(authController.me));
+router.get(
+  '/me',
+  optionalAuthenticate,
+  asyncHandler(
+    authController.me
+  )
+);
 router.post(
   '/change-password',
   authenticate,

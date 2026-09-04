@@ -29,6 +29,7 @@ import {
   cancelInstagramOAuth,
   connectFacebookPage,
   connectInstagramAccount,
+  connectTelegram,
   disconnectSocialConnection,
   getClientSocialConnections,
   getFacebookOAuthPages,
@@ -39,6 +40,19 @@ import {
   getInstagramOAuthStartUrl,
   verifySocialConnection,
 } from '../../services/socialConnections.api.js';
+
+import {
+  getThreadsOAuthResult,
+  getThreadsOAuthStartUrl,
+  testThreadsConnection,
+} from '../../services/threadsConnections.api.js';
+
+import {
+  getYouTubeOAuthResult,
+  getYouTubeOAuthStartUrl,
+  testYouTubeConnection,
+} from '../../services/youtubeConnections.api.js';
+
 import { formatDateTime } from '../../utils/format.js';
 import { getConnectionUiState } from '../../utils/socialConnectionState.js';
 import './social-connections.css';
@@ -48,7 +62,7 @@ import './social-connections.css';
 // PLATFORM CONFIGURATION
 // =====================================================
 //
-// Facebook and Instagram are currently implemented.
+// Facebook, Instagram, Telegram, Threads, and YouTube are currently implemented.
 // Remaining platforms stay visible as roadmap items until
 // their backend integrations are completed.
 // =====================================================
@@ -82,9 +96,9 @@ const PLATFORM_CONFIG = [
     code: 'youtube',
     name: 'YouTube',
     description:
-      'YouTube channel publishing integration.',
+      'Connect and verify a YouTube channel for future approved video publishing automation.',
     icon: FaYoutube,
-    available: false,
+    available: true,
   },
   {
     code: 'telegram',
@@ -92,7 +106,7 @@ const PLATFORM_CONFIG = [
     description:
       'Telegram channel publishing integration.',
     icon: FaTelegramPlane,
-    available: false,
+    available: true,
   },
   {
     code: 'x',
@@ -106,9 +120,9 @@ const PLATFORM_CONFIG = [
     code: 'threads',
     name: 'Threads',
     description:
-      'Threads account publishing integration.',
+      'Connect a Threads account for approved content publishing and automation.',
     icon: FaThreads,
-    available: false,
+    available: true,
   },
 ];
 
@@ -133,6 +147,10 @@ const STATUS_META = {
   ERROR: {
     label: 'Connection error',
     tone: 'danger',
+  },
+  DISCONNECTED: {
+    label: 'Not connected',
+    tone: 'neutral',
   },
   NOT_CONNECTED: {
     label: 'Not connected',
@@ -192,6 +210,26 @@ function getErrorMessage(
 }
 
 
+function getClientId(
+  client,
+) {
+  const value =
+    client?.client_id ??
+    client?.clientId ??
+    client?.id;
+
+  const clientId =
+    Number(value);
+
+  return (
+    Number.isInteger(clientId) &&
+    clientId > 0
+  )
+    ? clientId
+    : null;
+}
+
+
 function getAccountTypeLabel(
   platformCode,
 ) {
@@ -201,6 +239,15 @@ function getAccountTypeLabel(
 
     case 'instagram':
       return 'Instagram Professional account';
+
+    case 'telegram':
+      return 'Telegram channel';
+
+    case 'youtube':
+      return 'YouTube channel';
+
+    case 'threads':
+      return 'Threads account';
 
     default:
       return 'Connected account';
@@ -300,7 +347,29 @@ export default function SocialConnections() {
     selectedInstagramId,
     setSelectedInstagramId,
   ] = useState('');
+  // ===================================================
+  // TELEGRAM CONNECTION STATE
+  // ===================================================
 
+  const [
+    telegramModalOpen,
+    setTelegramModalOpen,
+  ] = useState(false);
+
+  const [
+    telegramBotToken,
+    setTelegramBotToken,
+  ] = useState('');
+
+  const [
+    telegramChannelId,
+    setTelegramChannelId,
+  ] = useState('');
+
+  const [
+    showTelegramToken,
+    setShowTelegramToken,
+  ] = useState(false);
 
   // ===================================================
   // LOAD ACTIVE CLIENT + CONNECTIONS
@@ -566,7 +635,7 @@ export default function SocialConnections() {
             setError(
               facebookOutcome
                 .message ||
-                'Facebook authorization could not be completed.',
+              'Facebook authorization could not be completed.',
             );
           }
         } catch (facebookError) {
@@ -622,7 +691,7 @@ export default function SocialConnections() {
             setError(
               instagramOutcome
                 .message ||
-                'Instagram authorization could not be completed.',
+              'Instagram authorization could not be completed.',
             );
           }
         } catch (instagramError) {
@@ -633,6 +702,132 @@ export default function SocialConnections() {
                 'Unable to read the Instagram connection result.',
               ),
             );
+          }
+        }
+      }
+
+
+
+      if (!active) {
+        return;
+      }
+
+
+      // -----------------------------------------------
+      // YOUTUBE OAUTH RESULT
+      // -----------------------------------------------
+
+      if (
+        enabledPlatforms.includes(
+          'youtube',
+        )
+      ) {
+        try {
+          const youtubeOutcome =
+            await getYouTubeOAuthResult();
+
+          if (!active) {
+            return;
+          }
+
+          if (
+            youtubeOutcome
+              ?.status ===
+            'CONNECTED'
+          ) {
+            setNotice(
+              youtubeOutcome
+                .message ||
+              'YouTube is connected and verified.',
+            );
+
+            await loadWorkspace();
+          } else if (
+            youtubeOutcome
+              ?.status ===
+            'ERROR'
+          ) {
+            setError(
+              youtubeOutcome
+                .message ||
+              'YouTube authorization could not be completed.',
+            );
+          }
+        } catch (youtubeError) {
+          if (active) {
+            setError(
+              getErrorMessage(
+                youtubeError,
+                'Unable to read the YouTube connection result.',
+              ),
+            );
+          }
+        }
+      }
+
+
+      if (!active) {
+        return;
+      }
+
+
+      // -----------------------------------------------
+      // THREADS OAUTH RESULT
+      // -----------------------------------------------
+
+      if (
+        enabledPlatforms.includes(
+          'threads',
+        )
+      ) {
+        const clientId =
+          getClientId(
+            loadedClient,
+          );
+
+        if (clientId) {
+          try {
+            const threadsOutcome =
+              await getThreadsOAuthResult(
+                clientId,
+              );
+
+            if (!active) {
+              return;
+            }
+
+            if (
+              threadsOutcome
+                ?.status ===
+              'CONNECTED'
+            ) {
+              setNotice(
+                threadsOutcome
+                  .message ||
+                'Threads is connected and verified.',
+              );
+
+              await loadWorkspace();
+            } else if (
+              threadsOutcome
+                ?.status ===
+              'ERROR'
+            ) {
+              setError(
+                threadsOutcome
+                  .message ||
+                'Threads authorization could not be completed.',
+              );
+            }
+          } catch (threadsError) {
+            if (active) {
+              setError(
+                getErrorMessage(
+                  threadsError,
+                  'Unable to read the Threads connection result.',
+                ),
+              );
+            }
           }
         }
       }
@@ -712,7 +907,7 @@ export default function SocialConnections() {
                 status,
                 statusMeta:
                   STATUS_META[
-                    status
+                  status
                   ] ||
                   STATUS_META
                     .NOT_CONNECTED,
@@ -797,11 +992,234 @@ export default function SocialConnections() {
 
 
   // ===================================================
+  // START THREADS OAUTH / RECONNECT
+  // ===================================================
+
+  const beginThreadsOAuth =
+    useCallback(
+      async () => {
+        const clientId =
+          getClientId(client);
+
+        if (!clientId) {
+          setError(
+            'A valid active client is required to connect Threads.',
+          );
+          return;
+        }
+
+        try {
+          setBusyAction(
+            'threads-oauth',
+          );
+
+          setError('');
+          setNotice('');
+
+          const authorizationUrl =
+            await getThreadsOAuthStartUrl(
+              clientId,
+            );
+
+          window.location.assign(
+            authorizationUrl,
+          );
+        } catch (threadsError) {
+          setError(
+            getErrorMessage(
+              threadsError,
+              'Unable to start Threads authorization.',
+            ),
+          );
+
+          setBusyAction('');
+        }
+      },
+      [client],
+    );
+
+  // ===================================================
+  // START YOUTUBE OAUTH / RECONNECT
+  // ===================================================
+
+  const beginYouTubeOAuth =
+    useCallback(
+      async () => {
+        try {
+          setBusyAction(
+            'youtube-oauth',
+          );
+
+          setError('');
+          setNotice('');
+
+          const authorizationUrl =
+            await getYouTubeOAuthStartUrl();
+
+          window.location.assign(
+            authorizationUrl,
+          );
+        } catch (youtubeError) {
+          setError(
+            getErrorMessage(
+              youtubeError,
+              'Unable to start YouTube authorization.',
+            ),
+          );
+
+          setBusyAction('');
+        }
+      },
+      [],
+    );
+
+
+  // ===================================================
+  // TELEGRAM CONNECT / RECONNECT
+  // ===================================================
+
+  const beginTelegramConnect =
+    useCallback(
+      (platform = null) => {
+        setError('');
+        setNotice('');
+
+        // Bot tokens are never returned by the backend.
+        // Always require the user to enter the current token.
+        setTelegramBotToken('');
+
+        // Reuse the stored numeric channel ID during reconnect.
+        // This avoids relying on a public @username.
+        setTelegramChannelId(
+          platform
+            ?.connection
+            ?.externalAccountId
+            ? String(
+                platform
+                  .connection
+                  .externalAccountId,
+              )
+            : '',
+        );
+
+        setShowTelegramToken(false);
+        setTelegramModalOpen(true);
+      },
+      [],
+    );
+
+
+  const closeTelegramModal =
+    useCallback(() => {
+      if (
+        busyAction ===
+        'telegram-connect'
+      ) {
+        return;
+      }
+
+      setTelegramModalOpen(false);
+
+      // Remove the credential from component memory when closed.
+      setTelegramBotToken('');
+      setTelegramChannelId('');
+      setShowTelegramToken(false);
+      setError('');
+    }, [busyAction]);
+
+
+  const handleTelegramConnect =
+    useCallback(
+      async (event) => {
+        event?.preventDefault();
+
+        const botToken =
+          String(
+            telegramBotToken ||
+            '',
+          ).trim();
+
+        const channelId =
+          String(
+            telegramChannelId ||
+            '',
+          ).trim();
+
+        if (!botToken) {
+          setError(
+            'Telegram bot token is required.',
+          );
+          return;
+        }
+
+        if (!channelId) {
+          setError(
+            'Telegram channel ID or username is required.',
+          );
+          return;
+        }
+
+        try {
+          setBusyAction(
+            'telegram-connect',
+          );
+
+          setError('');
+          setNotice('');
+
+          const connection =
+            await connectTelegram({
+              botToken,
+              channelId,
+            });
+
+          const channelName =
+            connection
+              ?.channel
+              ?.title ||
+            connection
+              ?.externalAccountName ||
+            connection
+              ?.external_account_name ||
+            'Telegram channel';
+
+          setTelegramModalOpen(false);
+
+          // Never retain the bot token after a successful request.
+          setTelegramBotToken('');
+          setTelegramChannelId('');
+          setShowTelegramToken(false);
+
+          setNotice(
+            `${channelName} is connected and verified.`,
+          );
+
+          await loadWorkspace();
+        } catch (connectError) {
+          setError(
+            getErrorMessage(
+              connectError,
+              'Telegram channel could not be connected.',
+            ),
+          );
+        } finally {
+          setBusyAction('');
+        }
+      },
+      [
+        loadWorkspace,
+        telegramBotToken,
+        telegramChannelId,
+      ],
+    );
+
+
+  // ===================================================
   // GENERIC VERIFY
   // ===================================================
   //
-  // Currently exposed in the UI for Facebook only.
-  // Instagram was already verified during account selection.
+  // Used by Facebook and Telegram. Instagram is already
+  // verified during its account-selection flow.
   // ===================================================
 
   const handleVerify =
@@ -823,9 +1241,35 @@ export default function SocialConnections() {
           setError('');
           setNotice('');
 
-          await verifySocialConnection(
-            connectionId,
-          );
+          if (
+            platform.code ===
+            'threads'
+          ) {
+            const clientId =
+              getClientId(client);
+
+            if (!clientId) {
+              throw new Error(
+                'A valid active client is required to test Threads.',
+              );
+            }
+
+            await testThreadsConnection({
+              clientId,
+              connectionId,
+            });
+          } else if (
+            platform.code ===
+            'youtube'
+          ) {
+            await testYouTubeConnection({
+              connectionId,
+            });
+          } else {
+            await verifySocialConnection(
+              connectionId,
+            );
+          }
 
           setNotice(
             `${platform.name} connection verified successfully.`,
@@ -845,7 +1289,10 @@ export default function SocialConnections() {
           setBusyAction('');
         }
       },
-      [loadWorkspace],
+      [
+        client,
+        loadWorkspace,
+      ],
     );
 
 
@@ -1366,6 +1813,8 @@ export default function SocialConnections() {
               platform.status ===
               'ERROR' ||
               platform.status ===
+              'DISCONNECTED' ||
+              platform.status ===
               'NOT_CONNECTED';
 
             const clientConnectionActive =
@@ -1614,6 +2063,296 @@ export default function SocialConnections() {
 
                             Change / reconnect
                           </button>
+                        )}
+
+                        {platform.connection &&
+                          clientConnectionActive && (
+                            <button
+                              type="button"
+                              className="social-button social-button--danger"
+                              onClick={() =>
+                                handleDisconnect(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `disconnect-${connectionId}`
+                              }
+                            >
+                              {busyAction ===
+                                `disconnect-${connectionId}`
+                                ? 'Disconnecting…'
+                                : 'Disconnect'}
+                            </button>
+                          )}
+                      </>
+                    )}
+                  {/* YOUTUBE */}
+
+                  {platform.code ===
+                    'youtube' && (
+                      <>
+                        {reconnect && (
+                          <button
+                            type="button"
+                            className="social-button social-button--primary"
+                            onClick={
+                              beginYouTubeOAuth
+                            }
+                            disabled={
+                              busyAction ===
+                              'youtube-oauth'
+                            }
+                          >
+                            <FaYoutube />
+
+                            {' '}
+
+                            {busyAction ===
+                              'youtube-oauth'
+                              ? 'Opening Google…'
+                              : platform.connection
+                                ? 'Reconnect YouTube'
+                                : 'Connect YouTube'}
+                          </button>
+                        )}
+
+                        {connected && (
+                          <>
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={() =>
+                                handleVerify(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `verify-${connectionId}`
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              {busyAction ===
+                                `verify-${connectionId}`
+                                ? 'Verifying…'
+                                : 'Test connection'}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={
+                                beginYouTubeOAuth
+                              }
+                              disabled={
+                                busyAction ===
+                                'youtube-oauth'
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              Change / reconnect
+                            </button>
+                          </>
+                        )}
+
+                        {platform.connection &&
+                          clientConnectionActive && (
+                            <button
+                              type="button"
+                              className="social-button social-button--danger"
+                              onClick={() =>
+                                handleDisconnect(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `disconnect-${connectionId}`
+                              }
+                            >
+                              {busyAction ===
+                                `disconnect-${connectionId}`
+                                ? 'Disconnecting…'
+                                : 'Disconnect'}
+                            </button>
+                          )}
+                      </>
+                    )}
+
+
+                  {/* TELEGRAM */}
+
+                  {platform.code ===
+                    'telegram' && (
+                      <>
+                        {reconnect && (
+                          <button
+                            type="button"
+                            className="social-button social-button--primary"
+                            onClick={() =>
+                              beginTelegramConnect(
+                                platform,
+                              )
+                            }
+                          >
+                            <FaTelegramPlane />
+
+                            {' '}
+
+                            {platform.connection
+                              ? 'Reconnect Telegram'
+                              : 'Connect Telegram'}
+                          </button>
+                        )}
+
+                        {connected && (
+                          <>
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={() =>
+                                handleVerify(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `verify-${connectionId}`
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              {busyAction ===
+                                `verify-${connectionId}`
+                                ? 'Verifying…'
+                                : 'Test connection'}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={() =>
+                                beginTelegramConnect(
+                                  platform,
+                                )
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              Change / reconnect
+                            </button>
+                          </>
+                        )}
+
+                        {platform.connection &&
+                          clientConnectionActive && (
+                            <button
+                              type="button"
+                              className="social-button social-button--danger"
+                              onClick={() =>
+                                handleDisconnect(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `disconnect-${connectionId}`
+                              }
+                            >
+                              {busyAction ===
+                                `disconnect-${connectionId}`
+                                ? 'Disconnecting…'
+                                : 'Disconnect'}
+                            </button>
+                          )}
+                      </>
+                    )}
+
+                  {/* THREADS */}
+
+                  {platform.code ===
+                    'threads' && (
+                      <>
+                        {reconnect && (
+                          <button
+                            type="button"
+                            className="social-button social-button--primary"
+                            onClick={
+                              beginThreadsOAuth
+                            }
+                            disabled={
+                              busyAction ===
+                              'threads-oauth'
+                            }
+                          >
+                            <FaThreads />
+
+                            {' '}
+
+                            {busyAction ===
+                              'threads-oauth'
+                              ? 'Opening Threads…'
+                              : platform.connection
+                                ? 'Reconnect Threads'
+                                : 'Connect Threads'}
+                          </button>
+                        )}
+
+                        {connected && (
+                          <>
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={() =>
+                                handleVerify(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `verify-${connectionId}`
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              {busyAction ===
+                                `verify-${connectionId}`
+                                ? 'Verifying…'
+                                : 'Test connection'}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={
+                                beginThreadsOAuth
+                              }
+                              disabled={
+                                busyAction ===
+                                'threads-oauth'
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              Change / reconnect
+                            </button>
+                          </>
                         )}
 
                         {platform.connection &&
@@ -1990,6 +2729,275 @@ export default function SocialConnections() {
                   : 'Connect selected account'}
               </button>
             </footer>
+          </section>
+        </div>
+
+      )}
+
+
+      {/* ============================================= */}
+      {/* TELEGRAM CONNECTION MODAL */}
+      {/* ============================================= */}
+
+      {telegramModalOpen && (
+        <div
+          className="social-modal-backdrop"
+          role="presentation"
+        >
+          <section
+            className="social-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="telegram-connect-title"
+          >
+            <header className="social-modal__header">
+              <div>
+                <p className="social-eyebrow">
+                  Telegram publishing
+                </p>
+
+                <h2 id="telegram-connect-title">
+                  Connect Telegram channel
+                </h2>
+
+                <p>
+                  Enter the bot token issued by BotFather and the
+                  target Telegram channel. The bot must be a channel
+                  administrator with permission to post messages.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="social-modal__close"
+                onClick={closeTelegramModal}
+                disabled={
+                  busyAction ===
+                  'telegram-connect'
+                }
+                aria-label="Close Telegram connection dialog"
+              >
+                ×
+              </button>
+            </header>
+
+
+            <form
+              onSubmit={handleTelegramConnect}
+            >
+              <div className="social-modal__body">
+                {error && (
+                  <div
+                    className="social-alert social-alert--danger"
+                    role="alert"
+                  >
+                    <FaTriangleExclamation
+                      aria-hidden="true"
+                    />
+
+                    <span>
+                      {error}
+                    </span>
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: '18px',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'grid',
+                      gap: '8px',
+                    }}
+                  >
+                    <label
+                      htmlFor="telegram-bot-token"
+                      style={{
+                        fontWeight: 700,
+                      }}
+                    >
+                      Bot token
+                    </label>
+
+                    <input
+                      id="telegram-bot-token"
+                      type={
+                        showTelegramToken
+                          ? 'text'
+                          : 'password'
+                      }
+                      value={telegramBotToken}
+                      onChange={(event) =>
+                        setTelegramBotToken(
+                          event.target.value,
+                        )
+                      }
+                      autoComplete="off"
+                      spellCheck="false"
+                      placeholder="123456789:AA..."
+                      disabled={
+                        busyAction ===
+                        'telegram-connect'
+                      }
+                      required
+                      style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        minHeight: '46px',
+                        padding: '10px 12px',
+                        border: '1px solid #d0d5dd',
+                        borderRadius: '8px',
+                        font: 'inherit',
+                      }}
+                    />
+
+                    <label
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        width: 'fit-content',
+                        fontSize: '0.9rem',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={showTelegramToken}
+                        onChange={(event) =>
+                          setShowTelegramToken(
+                            event.target.checked,
+                          )
+                        }
+                        disabled={
+                          busyAction ===
+                          'telegram-connect'
+                        }
+                      />
+
+                      Show bot token
+                    </label>
+
+                    <small>
+                      The token is sent directly to the backend,
+                      encrypted before storage, and never returned
+                      to the browser.
+                    </small>
+                  </div>
+
+
+                  <div
+                    style={{
+                      display: 'grid',
+                      gap: '8px',
+                    }}
+                  >
+                    <label
+                      htmlFor="telegram-channel-id"
+                      style={{
+                        fontWeight: 700,
+                      }}
+                    >
+                      Channel ID or username
+                    </label>
+
+                    <input
+                      id="telegram-channel-id"
+                      type="text"
+                      value={telegramChannelId}
+                      onChange={(event) =>
+                        setTelegramChannelId(
+                          event.target.value,
+                        )
+                      }
+                      autoComplete="off"
+                      spellCheck="false"
+                      placeholder="-1001234567890 or @channel_username"
+                      disabled={
+                        busyAction ===
+                        'telegram-connect'
+                      }
+                      required
+                      style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        minHeight: '46px',
+                        padding: '10px 12px',
+                        border: '1px solid #d0d5dd',
+                        borderRadius: '8px',
+                        font: 'inherit',
+                      }}
+                    />
+
+                    <small>
+                      For reconnecting, the saved numeric channel ID
+                      is filled automatically when available.
+                    </small>
+                  </div>
+
+
+                  <div
+                    className="social-security-banner"
+                    style={{
+                      margin: 0,
+                    }}
+                  >
+                    <span className="social-security-banner__icon">
+                      <FaShieldHalved />
+                    </span>
+
+                    <div>
+                      <strong>
+                        Server-side verification
+                      </strong>
+
+                      <p>
+                        Before saving, the backend validates the bot,
+                        channel, administrator membership, and posting
+                        permission with Telegram.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+
+              <footer className="social-modal__footer">
+                <button
+                  type="button"
+                  className="social-button social-button--secondary"
+                  onClick={closeTelegramModal}
+                  disabled={
+                    busyAction ===
+                    'telegram-connect'
+                  }
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="social-button social-button--primary"
+                  disabled={
+                    !telegramBotToken.trim() ||
+                    !telegramChannelId.trim() ||
+                    busyAction ===
+                    'telegram-connect'
+                  }
+                >
+                  <FaTelegramPlane />
+
+                  {' '}
+
+                  {busyAction ===
+                    'telegram-connect'
+                    ? 'Connecting…'
+                    : 'Connect Telegram'}
+                </button>
+              </footer>
+            </form>
           </section>
         </div>
       )}

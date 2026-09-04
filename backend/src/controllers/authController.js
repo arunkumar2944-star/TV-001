@@ -343,17 +343,48 @@ async function logout(
   );
 }
 
-async function me(req, res) {
-  return ok(res, {
-    user: userService.toPublic(req.user),
-    csrfToken: req.csrfToken || null,
-    permissions: {
-      canManageClients: req.user.role === 'PLATFORM_ADMIN',
-      canManageUsers: ['PLATFORM_ADMIN', 'CLIENT_ADMIN'].includes(req.user.role),
-      canApprove: true,
-      canPublish: true,
-      canRetry: true,
-      canViewAudit: true,
+async function me(
+  req,
+  res
+) {
+  /*
+   * No valid authentication token.
+   *
+   * This is the normal state when
+   * displaying the Login page.
+   */
+  if (!req.user) {
+    return res.status(200).json({
+      success: true,
+
+      authenticated:
+        false,
+
+      data: {
+        user: null,
+      },
+    });
+  }
+
+  /*
+   * optionalAuthenticate already:
+   *
+   * 1. verified the token
+   * 2. loaded the user
+   * 3. checked is_active
+   *
+   * So there is no need to query
+   * the database again here.
+   */
+  return res.status(200).json({
+    success: true,
+
+    authenticated:
+      true,
+
+    data: {
+      user:
+        req.user,
     },
   });
 }

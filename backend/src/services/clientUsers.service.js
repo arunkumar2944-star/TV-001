@@ -7,10 +7,18 @@ const {
   findClientById,
   findUsersByClientId,
   findActiveClientAdminByClientId,
+  findUserByIdForClient,
   createClientUser,
+  updateClientUserStatus,
+  updateClientUserProfile,
 } = require(
   '../repositories/clientUsers.repository'
 );
+
+
+// ======================================================
+// ROLE RULES
+// ======================================================
 
 const ALLOWED_CLIENT_ROLES =
   new Set([
@@ -19,25 +27,67 @@ const ALLOWED_CLIENT_ROLES =
     'APPROVER',
   ]);
 
+
 const CLIENT_ADMIN_ALLOWED_ROLES =
   new Set([
     'CONTENT_CREATOR',
     'APPROVER',
   ]);
 
-/**
- * --------------------------------------------------
- * HELPERS
- * --------------------------------------------------
- */
 
-function normalizeText(value) {
-  if (typeof value !== 'string') {
+// ======================================================
+// HELPERS
+// ======================================================
+
+function normalizeText(
+  value
+) {
+  if (
+    typeof value !==
+    'string'
+  ) {
     return '';
   }
 
   return value.trim();
 }
+
+
+function normalizeRole(
+  value
+) {
+  return normalizeText(
+    value
+  ).toUpperCase();
+}
+
+
+function getPositiveInteger(
+  value
+) {
+  const number =
+    Number(value);
+
+  if (
+    !Number.isInteger(number) ||
+    number <= 0
+  ) {
+    return null;
+  }
+
+  return number;
+}
+
+
+function getUserId(
+  user
+) {
+  return getPositiveInteger(
+    user?.user_id ??
+    user?.id
+  );
+}
+
 
 function createServiceError(
   message,
@@ -56,18 +106,31 @@ function createServiceError(
   return error;
 }
 
-/**
- * --------------------------------------------------
- * GET CLIENT USERS
- * --------------------------------------------------
- */
+
+// ======================================================
+// GET CLIENT USERS
+// ======================================================
 
 async function getClientUsersService({
   clientId,
 }) {
+  const normalizedClientId =
+    getPositiveInteger(
+      clientId
+    );
+
+  if (!normalizedClientId) {
+    throw createServiceError(
+      'Invalid client.',
+      400,
+      'INVALID_CLIENT'
+    );
+  }
+
+
   const client =
     await findClientById(
-      clientId
+      normalizedClientId
     );
 
   if (!client) {
@@ -78,10 +141,12 @@ async function getClientUsersService({
     );
   }
 
+
   const users =
     await findUsersByClientId(
-      clientId
+      normalizedClientId
     );
+
 
   return {
     client: {
@@ -107,32 +172,41 @@ async function getClientUsersService({
   };
 }
 
-/**
- * --------------------------------------------------
- * RESOLVE ROLE TO CREATE
- * --------------------------------------------------
- */
+
+// ======================================================
+// RESOLVE ROLE TO CREATE
+// ======================================================
 
 function resolveRoleToCreate({
   actorRole,
   requestedRole,
 }) {
   const normalizedActorRole =
-    normalizeText(
+    normalizeRole(
       actorRole
-    ).toUpperCase();
+    );
 
   const normalizedRequestedRole =
-    normalizeText(
+    normalizeRole(
       requestedRole
-    ).toUpperCase();
+    );
 
-  /**
-   * PLATFORM_ADMIN
-   *
-   * Platform Admin creates the
-   * administrator for the selected client.
-   */
+
+  // --------------------------------------------------
+  // PLATFORM ADMIN
+  // --------------------------------------------------
+  //
+  // Platform Admin creates the Client Admin.
+  //
+  // Your dedicated frontend endpoint is:
+  //
+  // POST /api/client/admin
+  //
+  // We keep this service rule because your existing
+  // working backend may reuse this service.
+  //
+  // --------------------------------------------------
+
   if (
     normalizedActorRole ===
     'PLATFORM_ADMIN'
@@ -140,14 +214,11 @@ function resolveRoleToCreate({
     return 'CLIENT_ADMIN';
   }
 
-  /**
-   * CLIENT_ADMIN
-   *
-   * Client Admin can create:
-   *
-   * - CONTENT_CREATOR
-   * - APPROVER
-   */
+
+  // --------------------------------------------------
+  // CLIENT ADMIN
+  // --------------------------------------------------
+
   if (
     normalizedActorRole ===
     'CLIENT_ADMIN'
@@ -167,10 +238,7 @@ function resolveRoleToCreate({
     return normalizedRequestedRole;
   }
 
-  /**
-   * Other users cannot create
-   * client users.
-   */
+
   throw createServiceError(
     'You are not allowed to create client users.',
     403,
@@ -178,11 +246,10 @@ function resolveRoleToCreate({
   );
 }
 
-/**
- * --------------------------------------------------
- * CREATE CLIENT USER
- * --------------------------------------------------
- */
+
+// ======================================================
+// CREATE CLIENT USER
+// ======================================================
 
 async function createClientUserService({
   clientId,
@@ -194,15 +261,28 @@ async function createClientUserService({
   password,
   requestedRole,
 }) {
-  /**
-   * -----------------------------------------------
-   * CLIENT VALIDATION
-   * -----------------------------------------------
-   */
+
+  // --------------------------------------------------
+  // CLIENT VALIDATION
+  // --------------------------------------------------
+
+  const normalizedClientId =
+    getPositiveInteger(
+      clientId
+    );
+
+  if (!normalizedClientId) {
+    throw createServiceError(
+      'Invalid client.',
+      400,
+      'INVALID_CLIENT'
+    );
+  }
+
 
   const client =
     await findClientById(
-      clientId
+      normalizedClientId
     );
 
   if (!client) {
@@ -212,6 +292,7 @@ async function createClientUserService({
       'CLIENT_NOT_FOUND'
     );
   }
+
 
   if (
     client.is_active !== true
@@ -223,11 +304,10 @@ async function createClientUserService({
     );
   }
 
-  /**
-   * -----------------------------------------------
-   * NORMALIZE INPUT
-   * -----------------------------------------------
-   */
+
+  // --------------------------------------------------
+  // NORMALIZE INPUT
+  // --------------------------------------------------
 
   const normalizedUsername =
     normalizeText(
@@ -244,11 +324,10 @@ async function createClientUserService({
       email
     ).toLowerCase();
 
-  /**
-   * -----------------------------------------------
-   * FIELD VALIDATION
-   * -----------------------------------------------
-   */
+
+  // --------------------------------------------------
+  // FIELD VALIDATION
+  // --------------------------------------------------
 
   if (!normalizedUsername) {
     throw createServiceError(
@@ -257,6 +336,7 @@ async function createClientUserService({
       'USERNAME_REQUIRED'
     );
   }
+
 
   if (
     !/^[a-zA-Z0-9._-]{3,100}$/.test(
@@ -270,6 +350,7 @@ async function createClientUserService({
     );
   }
 
+
   if (!normalizedFullName) {
     throw createServiceError(
       'Full name is required.',
@@ -278,6 +359,7 @@ async function createClientUserService({
     );
   }
 
+
   if (!normalizedEmail) {
     throw createServiceError(
       'Email is required.',
@@ -285,6 +367,7 @@ async function createClientUserService({
       'EMAIL_REQUIRED'
     );
   }
+
 
   if (
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
@@ -298,6 +381,7 @@ async function createClientUserService({
     );
   }
 
+
   if (
     typeof password !==
       'string' ||
@@ -310,18 +394,17 @@ async function createClientUserService({
     );
   }
 
-  /**
-   * -----------------------------------------------
-   * ACTOR VALIDATION
-   * -----------------------------------------------
-   */
 
-  if (
-    !Number.isInteger(
+  // --------------------------------------------------
+  // ACTOR VALIDATION
+  // --------------------------------------------------
+
+  const normalizedActorUserId =
+    getPositiveInteger(
       actorUserId
-    ) ||
-    actorUserId <= 0
-  ) {
+    );
+
+  if (!normalizedActorUserId) {
     throw createServiceError(
       'Authenticated user information is invalid.',
       401,
@@ -329,17 +412,17 @@ async function createClientUserService({
     );
   }
 
-  /**
-   * -----------------------------------------------
-   * RESOLVE ROLE
-   * -----------------------------------------------
-   */
+
+  // --------------------------------------------------
+  // RESOLVE ROLE
+  // --------------------------------------------------
 
   const roleToCreate =
     resolveRoleToCreate({
       actorRole,
       requestedRole,
     });
+
 
   if (
     !ALLOWED_CLIENT_ROLES.has(
@@ -353,11 +436,10 @@ async function createClientUserService({
     );
   }
 
-  /**
-   * -----------------------------------------------
-   * ONE CLIENT ADMIN PER CLIENT
-   * -----------------------------------------------
-   */
+
+  // --------------------------------------------------
+  // ONE ACTIVE CLIENT ADMIN PER CLIENT
+  // --------------------------------------------------
 
   if (
     roleToCreate ===
@@ -365,7 +447,7 @@ async function createClientUserService({
   ) {
     const existingAdmin =
       await findActiveClientAdminByClientId(
-        clientId
+        normalizedClientId
       );
 
     if (existingAdmin) {
@@ -377,11 +459,10 @@ async function createClientUserService({
     }
   }
 
-  /**
-   * -----------------------------------------------
-   * PASSWORD HASH
-   * -----------------------------------------------
-   */
+
+  // --------------------------------------------------
+  // PASSWORD HASH
+  // --------------------------------------------------
 
   const passwordHash =
     await bcrypt.hash(
@@ -389,16 +470,16 @@ async function createClientUserService({
       12
     );
 
-  /**
-   * -----------------------------------------------
-   * CREATE USER
-   * -----------------------------------------------
-   */
+
+  // --------------------------------------------------
+  // CREATE USER
+  // --------------------------------------------------
 
   try {
     const user =
       await createClientUser({
-        clientId,
+        clientId:
+          normalizedClientId,
 
         username:
           normalizedUsername,
@@ -415,25 +496,22 @@ async function createClientUserService({
           roleToCreate,
 
         createdBy:
-          actorUserId,
+          normalizedActorUserId,
       });
 
     return user;
 
   } catch (error) {
-    /**
-     * PostgreSQL:
-     *
-     * 23505 = unique_violation
-     */
+
+    // PostgreSQL:
+    //
+    // 23505 = unique_violation
 
     if (
-      error.code === '23505'
+      error.code ===
+      '23505'
     ) {
-      /**
-       * One active CLIENT_ADMIN
-       * unique-index violation.
-       */
+
       if (
         error.constraint ===
         'uq_one_active_client_admin_per_client'
@@ -445,10 +523,7 @@ async function createClientUserService({
         );
       }
 
-      /**
-       * Other duplicate constraints,
-       * usually username/email.
-       */
+
       throw createServiceError(
         'A user with this username or email already exists.',
         409,
@@ -460,7 +535,749 @@ async function createClientUserService({
   }
 }
 
+
+// ======================================================
+// UPDATE CLIENT USER STATUS
+// ======================================================
+//
+// PLATFORM_ADMIN:
+//   can manage CLIENT_ADMIN only.
+//
+// CLIENT_ADMIN:
+//   can manage CONTENT_CREATOR / APPROVER only.
+//
+// The target user must always belong to clientId.
+//
+// ======================================================
+
+async function updateClientUserStatusService({
+  clientId,
+  actorUserId,
+  actorRole,
+  targetUserId,
+  isActive,
+}) {
+
+  // --------------------------------------------------
+  // BASIC VALIDATION
+  // --------------------------------------------------
+
+  const normalizedClientId =
+    getPositiveInteger(
+      clientId
+    );
+
+  if (!normalizedClientId) {
+    throw createServiceError(
+      'Invalid client.',
+      400,
+      'INVALID_CLIENT'
+    );
+  }
+
+
+  const normalizedActorUserId =
+    getPositiveInteger(
+      actorUserId
+    );
+
+  if (!normalizedActorUserId) {
+    throw createServiceError(
+      'Authenticated user information is invalid.',
+      401,
+      'INVALID_AUTHENTICATED_USER'
+    );
+  }
+
+
+  const normalizedTargetUserId =
+    getPositiveInteger(
+      targetUserId
+    );
+
+  if (!normalizedTargetUserId) {
+    throw createServiceError(
+      'Invalid user.',
+      400,
+      'INVALID_USER'
+    );
+  }
+
+
+  if (
+    typeof isActive !==
+    'boolean'
+  ) {
+    throw createServiceError(
+      'isActive must be a boolean value.',
+      400,
+      'INVALID_USER_STATUS'
+    );
+  }
+
+
+  const normalizedActorRole =
+    normalizeRole(
+      actorRole
+    );
+
+
+  if (
+    ![
+      'PLATFORM_ADMIN',
+      'CLIENT_ADMIN',
+    ].includes(
+      normalizedActorRole
+    )
+  ) {
+    throw createServiceError(
+      'You are not allowed to manage client users.',
+      403,
+      'USER_MANAGEMENT_NOT_ALLOWED'
+    );
+  }
+
+
+  // --------------------------------------------------
+  // CLIENT VALIDATION
+  // --------------------------------------------------
+
+  const client =
+    await findClientById(
+      normalizedClientId
+    );
+
+  if (!client) {
+    throw createServiceError(
+      'Client not found.',
+      404,
+      'CLIENT_NOT_FOUND'
+    );
+  }
+
+
+  /*
+   * Deactivation is still allowed when the client
+   * itself is inactive.
+   *
+   * Activation is blocked because an inactive client
+   * should not gain active users.
+   */
+  if (
+    isActive === true &&
+    client.is_active !== true
+  ) {
+    throw createServiceError(
+      'A user cannot be activated while the client is inactive.',
+      409,
+      'CLIENT_INACTIVE'
+    );
+  }
+
+
+  // --------------------------------------------------
+  // LOAD TARGET USER INSIDE CLIENT
+  // --------------------------------------------------
+  //
+  // IMPORTANT:
+  //
+  // Repository query must include BOTH:
+  //
+  // user_id = targetUserId
+  // client_id = clientId
+  //
+  // This prevents cross-client user management.
+  //
+  // --------------------------------------------------
+
+  const targetUser =
+    await findUserByIdForClient({
+      clientId:
+        normalizedClientId,
+
+      userId:
+        normalizedTargetUserId,
+    });
+
+
+  if (!targetUser) {
+    throw createServiceError(
+      'Client user not found.',
+      404,
+      'CLIENT_USER_NOT_FOUND'
+    );
+  }
+
+
+  const targetRole =
+    normalizeRole(
+      targetUser.role
+    );
+
+
+  // --------------------------------------------------
+  // PLATFORM ADMIN USERS MUST NEVER BE MANAGED HERE
+  // --------------------------------------------------
+
+  if (
+    targetRole ===
+    'PLATFORM_ADMIN'
+  ) {
+    throw createServiceError(
+      'Platform Admin users cannot be managed through client user management.',
+      403,
+      'PLATFORM_ADMIN_MANAGEMENT_NOT_ALLOWED'
+    );
+  }
+
+
+  // --------------------------------------------------
+  // SELF-DEACTIVATION PROTECTION
+  // --------------------------------------------------
+
+  const targetId =
+    getUserId(
+      targetUser
+    );
+
+
+  if (
+    isActive === false &&
+    targetId ===
+      normalizedActorUserId
+  ) {
+    throw createServiceError(
+      'You cannot deactivate your own account.',
+      409,
+      'SELF_DEACTIVATION_NOT_ALLOWED'
+    );
+  }
+
+
+  // --------------------------------------------------
+  // PLATFORM ADMIN PERMISSION
+  // --------------------------------------------------
+
+  if (
+    normalizedActorRole ===
+    'PLATFORM_ADMIN'
+  ) {
+    if (
+      targetRole !==
+      'CLIENT_ADMIN'
+    ) {
+      throw createServiceError(
+        'Platform Admin can only manage Client Admin users through this operation.',
+        403,
+        'TARGET_ROLE_NOT_ALLOWED'
+      );
+    }
+  }
+
+
+  // --------------------------------------------------
+  // CLIENT ADMIN PERMISSION
+  // --------------------------------------------------
+
+  if (
+    normalizedActorRole ===
+    'CLIENT_ADMIN'
+  ) {
+    if (
+      !CLIENT_ADMIN_ALLOWED_ROLES.has(
+        targetRole
+      )
+    ) {
+      throw createServiceError(
+        'Client Admin can only manage Content Creator or Approver users.',
+        403,
+        'TARGET_ROLE_NOT_ALLOWED'
+      );
+    }
+  }
+
+
+  // --------------------------------------------------
+  // IDEMPOTENT STATUS UPDATE
+  // --------------------------------------------------
+  //
+  // If status is already correct there is nothing
+  // to update.
+  //
+  // --------------------------------------------------
+
+  if (
+    targetUser.is_active ===
+    isActive
+  ) {
+    return targetUser;
+  }
+
+
+  // --------------------------------------------------
+  // CLIENT ADMIN ACTIVATION RULE
+  // --------------------------------------------------
+  //
+  // Only one active CLIENT_ADMIN may exist for client.
+  //
+  // This check is done here for a friendly response.
+  // The PostgreSQL unique index is still the final
+  // concurrency-safe protection.
+  //
+  // --------------------------------------------------
+
+  if (
+    targetRole ===
+      'CLIENT_ADMIN' &&
+    isActive === true
+  ) {
+    const existingAdmin =
+      await findActiveClientAdminByClientId(
+        normalizedClientId
+      );
+
+
+    if (
+      existingAdmin &&
+      getUserId(
+        existingAdmin
+      ) !==
+        normalizedTargetUserId
+    ) {
+      throw createServiceError(
+        'This client already has an active Client Admin.',
+        409,
+        'CLIENT_ADMIN_ALREADY_EXISTS'
+      );
+    }
+  }
+
+
+  // --------------------------------------------------
+  // UPDATE DATABASE
+  // --------------------------------------------------
+
+  try {
+    const updatedUser =
+      await updateClientUserStatus({
+        clientId:
+          normalizedClientId,
+
+        userId:
+          normalizedTargetUserId,
+
+        isActive,
+      });
+
+
+    if (!updatedUser) {
+      throw createServiceError(
+        'Client user not found.',
+        404,
+        'CLIENT_USER_NOT_FOUND'
+      );
+    }
+
+
+    return updatedUser;
+
+  } catch (error) {
+
+    /*
+     * Concurrent Client Admin activation may still
+     * reach the database unique constraint.
+     */
+    if (
+      error.code ===
+        '23505' &&
+      error.constraint ===
+        'uq_one_active_client_admin_per_client'
+    ) {
+      throw createServiceError(
+        'This client already has an active Client Admin.',
+        409,
+        'CLIENT_ADMIN_ALREADY_EXISTS'
+      );
+    }
+
+
+    throw error;
+  }
+}
+async function getClientUserDetailsService({
+  clientId,
+  userId,
+}) {
+  const normalizedClientId =
+    getPositiveInteger(
+      clientId
+    );
+
+  if (!normalizedClientId) {
+    throw createServiceError(
+      'Invalid client.',
+      400,
+      'INVALID_CLIENT'
+    );
+  }
+
+  const normalizedUserId =
+    getPositiveInteger(
+      userId
+    );
+
+  if (!normalizedUserId) {
+    throw createServiceError(
+      'Invalid user.',
+      400,
+      'INVALID_USER'
+    );
+  }
+
+  const client =
+    await findClientById(
+      normalizedClientId
+    );
+
+  if (!client) {
+    throw createServiceError(
+      'Client not found.',
+      404,
+      'CLIENT_NOT_FOUND'
+    );
+  }
+
+  const user =
+    await findUserByIdForClient({
+      clientId:
+        normalizedClientId,
+
+      userId:
+        normalizedUserId,
+    });
+
+  if (!user) {
+    throw createServiceError(
+      'Client user not found.',
+      404,
+      'CLIENT_USER_NOT_FOUND'
+    );
+  }
+
+  return {
+    client: {
+      client_id:
+        client.client_id,
+
+      client_code:
+        client.client_code,
+
+      business_name:
+        client.business_name,
+    },
+
+    user,
+  };
+}
+
+
+// ======================================================
+// UPDATE CLIENT USER PROFILE
+// ======================================================
+
+async function updateClientUserProfileService({
+  clientId,
+  actorUserId,
+  actorRole,
+  targetUserId,
+  username,
+  fullName,
+  email,
+}) {
+  const normalizedClientId =
+    getPositiveInteger(
+      clientId
+    );
+
+  if (!normalizedClientId) {
+    throw createServiceError(
+      'Invalid client.',
+      400,
+      'INVALID_CLIENT'
+    );
+  }
+
+
+  const normalizedActorUserId =
+    getPositiveInteger(
+      actorUserId
+    );
+
+  if (!normalizedActorUserId) {
+    throw createServiceError(
+      'Authenticated user information is invalid.',
+      401,
+      'INVALID_AUTHENTICATED_USER'
+    );
+  }
+
+
+  const normalizedTargetUserId =
+    getPositiveInteger(
+      targetUserId
+    );
+
+  if (!normalizedTargetUserId) {
+    throw createServiceError(
+      'Invalid user.',
+      400,
+      'INVALID_USER'
+    );
+  }
+
+
+  const normalizedActorRole =
+    normalizeRole(
+      actorRole
+    );
+
+
+  if (
+    ![
+      'PLATFORM_ADMIN',
+      'CLIENT_ADMIN',
+    ].includes(
+      normalizedActorRole
+    )
+  ) {
+    throw createServiceError(
+      'You are not allowed to edit client users.',
+      403,
+      'USER_EDIT_NOT_ALLOWED'
+    );
+  }
+
+
+  // --------------------------------------------------
+  // CLIENT
+  // --------------------------------------------------
+
+  const client =
+    await findClientById(
+      normalizedClientId
+    );
+
+  if (!client) {
+    throw createServiceError(
+      'Client not found.',
+      404,
+      'CLIENT_NOT_FOUND'
+    );
+  }
+
+
+  // --------------------------------------------------
+  // TARGET USER
+  // --------------------------------------------------
+
+  const targetUser =
+    await findUserByIdForClient({
+      clientId:
+        normalizedClientId,
+
+      userId:
+        normalizedTargetUserId,
+    });
+
+
+  if (!targetUser) {
+    throw createServiceError(
+      'Client user not found.',
+      404,
+      'CLIENT_USER_NOT_FOUND'
+    );
+  }
+
+
+  const targetRole =
+    normalizeRole(
+      targetUser.role
+    );
+
+
+  // --------------------------------------------------
+  // PERMISSIONS
+  // --------------------------------------------------
+
+  if (
+    normalizedActorRole ===
+    'PLATFORM_ADMIN' &&
+    targetRole !==
+    'CLIENT_ADMIN'
+  ) {
+    throw createServiceError(
+      'Platform Admin can only edit Client Admin users.',
+      403,
+      'TARGET_ROLE_NOT_ALLOWED'
+    );
+  }
+
+
+  if (
+    normalizedActorRole ===
+    'CLIENT_ADMIN' &&
+    !CLIENT_ADMIN_ALLOWED_ROLES.has(
+      targetRole
+    )
+  ) {
+    throw createServiceError(
+      'Client Admin can only edit Content Creator or Approver users.',
+      403,
+      'TARGET_ROLE_NOT_ALLOWED'
+    );
+  }
+
+
+  // --------------------------------------------------
+  // NORMALIZE INPUT
+  // --------------------------------------------------
+
+  const normalizedUsername =
+    normalizeText(
+      username
+    ).toLowerCase();
+
+  const normalizedFullName =
+    normalizeText(
+      fullName
+    );
+
+  const normalizedEmail =
+    normalizeText(
+      email
+    ).toLowerCase();
+
+
+  // --------------------------------------------------
+  // VALIDATION
+  // --------------------------------------------------
+
+  if (!normalizedUsername) {
+    throw createServiceError(
+      'Username is required.',
+      400,
+      'USERNAME_REQUIRED'
+    );
+  }
+
+
+  if (
+    !/^[a-zA-Z0-9._-]{3,100}$/.test(
+      normalizedUsername
+    )
+  ) {
+    throw createServiceError(
+      'Username must contain 3-100 letters, numbers, dots, underscores, or hyphens.',
+      400,
+      'INVALID_USERNAME'
+    );
+  }
+
+
+  if (!normalizedFullName) {
+    throw createServiceError(
+      'Full name is required.',
+      400,
+      'FULL_NAME_REQUIRED'
+    );
+  }
+
+
+  if (!normalizedEmail) {
+    throw createServiceError(
+      'Email is required.',
+      400,
+      'EMAIL_REQUIRED'
+    );
+  }
+
+
+  if (
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      normalizedEmail
+    )
+  ) {
+    throw createServiceError(
+      'Enter a valid email address.',
+      400,
+      'INVALID_EMAIL'
+    );
+  }
+
+
+  // --------------------------------------------------
+  // UPDATE
+  // --------------------------------------------------
+
+  try {
+    const updatedUser =
+      await updateClientUserProfile({
+        clientId:
+          normalizedClientId,
+
+        userId:
+          normalizedTargetUserId,
+
+        username:
+          normalizedUsername,
+
+        fullName:
+          normalizedFullName,
+
+        email:
+          normalizedEmail,
+      });
+
+
+    if (!updatedUser) {
+      throw createServiceError(
+        'Client user not found.',
+        404,
+        'CLIENT_USER_NOT_FOUND'
+      );
+    }
+
+
+    return updatedUser;
+
+  } catch (error) {
+
+    /*
+     * Username/email unique constraint.
+     */
+    if (
+      error.code ===
+      '23505'
+    ) {
+      throw createServiceError(
+        'A user with this username or email already exists.',
+        409,
+        'USER_ALREADY_EXISTS'
+      );
+    }
+
+
+    throw error;
+  }
+}
+// ======================================================
+// EXPORTS
+// ======================================================
+
 module.exports = {
   getClientUsersService,
+  getClientUserDetailsService,
   createClientUserService,
+  updateClientUserStatusService,
+  updateClientUserProfileService,
 };

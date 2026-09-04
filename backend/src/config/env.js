@@ -469,6 +469,15 @@ const config = {
         process.env
           .META_INSTAGRAM_CALLBACK_URL
       ),
+    // Threads
+    threadsAppId:
+      process.env.META_THREADS_APP_ID,
+
+    threadsAppSecret:
+      process.env.META_THREADS_APP_SECRET,
+
+    threadsCallbackUrl:
+      process.env.META_THREADS_CALLBACK_URI,
     graphVersion:
       process.env.META_GRAPH_VERSION?.trim() ||
       'v26.0',

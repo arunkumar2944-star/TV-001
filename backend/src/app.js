@@ -85,7 +85,10 @@ const socialConnectionsRoutes =
   require(
     './routes/socialConnections.routes'
   );
-
+const threadsRoutes =
+  require(
+    './routes/threads.routes'
+  );
 
 const platformAdminRoutes =
   require(
@@ -685,7 +688,14 @@ function createApp() {
     '/api',
     instagramRoutes
   );
+// ====================================================
+// THREADS OAUTH ROUTES
+// ====================================================
 
+app.use(
+  '/api',
+  threadsRoutes
+);
 
   // ====================================================
   // USER ROUTES

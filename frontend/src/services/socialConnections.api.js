@@ -162,3 +162,29 @@ export async function cancelInstagramOAuth() {
 
   return response?.data;
 }
+
+
+// =====================================================
+// CONNECT TELEGRAM
+// =====================================================
+
+export async function connectTelegram({
+  botToken,
+  channelId,
+}) {
+  const response =
+    await api.post(
+      '/client/social-connections/telegram/connect',
+      {
+        botToken,
+        channelId,
+      }
+    );
+
+  return (
+    response?.data?.data?.connection ??
+    response?.data?.data ??
+    response?.data ??
+    null
+  );
+}

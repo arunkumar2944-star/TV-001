@@ -34,6 +34,7 @@ export default function ChangePasswordPage() {
         useLocation();
 
     const {
+        user,
         refreshUser,
     } = useAuth();
 
@@ -121,7 +122,7 @@ export default function ChangePasswordPage() {
             confirmPassword
         ) &&
         newPassword ===
-            confirmPassword;
+        confirmPassword;
 
     const isFormValid =
         isPasswordValid &&
@@ -295,9 +296,41 @@ export default function ChangePasswordPage() {
              * Preserve your existing
              * redirect functionality.
              */
+            const role =
+                String(
+                    user?.role ||
+                    ''
+                )
+                    .trim()
+                    .toUpperCase();
+
+
+            // ======================================================
+            // CLIENT ADMIN → ONBOARDING
+            // ======================================================
+
+            if (
+                role ===
+                'CLIENT_ADMIN'
+            ) {
+                navigate(
+                    '/client/onboarding',
+                    {
+                        replace: true,
+                    }
+                );
+
+                return;
+            }
+
+
+            // ======================================================
+            // EXISTING REDIRECT FLOW
+            // ======================================================
+
             const target =
                 location.state?.from &&
-                location.state.from !==
+                    location.state.from !==
                     '/change-password'
                     ? location.state.from
                     : '/dashboard';
@@ -309,11 +342,11 @@ export default function ChangePasswordPage() {
                 }
             );
         } catch (
-            caught
+        caught
         ) {
             setError(
                 caught?.message ||
-                    'Unable to change password. Please try again.'
+                'Unable to change password. Please try again.'
             );
         } finally {
             setSubmitting(
@@ -423,12 +456,11 @@ export default function ChangePasswordPage() {
                         </label>
 
                         <div
-                            className={`password-input-wrapper ${
-                                touched.newPassword &&
+                            className={`password-input-wrapper ${touched.newPassword &&
                                 !isPasswordValid
-                                    ? 'password-input-error'
-                                    : ''
-                            }`}
+                                ? 'password-input-error'
+                                : ''
+                                }`}
                         >
                             <input
                                 id="newPassword"
@@ -519,12 +551,11 @@ export default function ChangePasswordPage() {
                                                 key={
                                                     level
                                                 }
-                                                className={`strength-bar ${
-                                                    passwordStrength.level >=
+                                                className={`strength-bar ${passwordStrength.level >=
                                                     level
-                                                        ? `strength-bar-active strength-${passwordStrength.level}`
-                                                        : ''
-                                                }`}
+                                                    ? `strength-bar-active strength-${passwordStrength.level}`
+                                                    : ''
+                                                    }`}
                                             />
                                         )
                                     )}
@@ -597,17 +628,15 @@ export default function ChangePasswordPage() {
                         </label>
 
                         <div
-                            className={`password-input-wrapper ${
-                                touched.confirmPassword &&
+                            className={`password-input-wrapper ${touched.confirmPassword &&
                                 confirmPassword &&
                                 !passwordsMatch
-                                    ? 'password-input-error'
-                                    : ''
-                            } ${
-                                passwordsMatch
+                                ? 'password-input-error'
+                                : ''
+                                } ${passwordsMatch
                                     ? 'password-input-success'
                                     : ''
-                            }`}
+                                }`}
                         >
                             <input
                                 id="confirmPassword"
@@ -749,11 +778,10 @@ function PasswordRule({
 }) {
     return (
         <div
-            className={`password-rule ${
-                passed
-                    ? 'password-rule-passed'
-                    : ''
-            }`}
+            className={`password-rule ${passed
+                ? 'password-rule-passed'
+                : ''
+                }`}
         >
             <span
                 className="password-rule-icon"

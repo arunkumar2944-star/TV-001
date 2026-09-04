@@ -8,16 +8,36 @@ const socialConnectionRepository =
     '../repositories/socialConnections.repository'
   );
 
+const clientRepository =
+  require(
+    '../repositories/clientRepository'
+  );
+
 const {
   verifyFacebookConnection,
 } =
-  require('./facebook.service');
+  require(
+    './facebook.service'
+  );
 
 const {
   verifyInstagramConnection,
 } =
-  require('./instagram.service');
+  require(
+    './instagram.service'
+  );
 
+const {
+  verifyStoredTelegramConnection,
+} =
+  require(
+    './telegram.service'
+  );
+const {
+  verifyStoredThreadsConnection,
+} = require(
+  './threads.service'
+);
 
 // ==========================================================
 // SERVICE ERROR
@@ -32,7 +52,9 @@ function createServiceError(
     statusCode,
     message,
     code
-      ? { code }
+      ? {
+        code,
+      }
       : {}
   );
 }
@@ -43,9 +65,11 @@ function createServiceError(
 // ==========================================================
 //
 // Never expose:
+//
 // - encrypted token
 // - IV
 // - auth tag
+//
 // ==========================================================
 
 function toPublicConnection(
@@ -138,19 +162,33 @@ async function getClientConnections(
 // Backend only.
 //
 // This may include encrypted token fields.
+//
 // Never return this object directly to React.
+//
 // ==========================================================
 
 async function getConnection(
   connectionId,
   clientId
 ) {
-  return socialConnectionRepository
-    .findByIdAndClientId(
-      connectionId,
-      clientId
-    );
+  return (
+    socialConnectionRepository
+      .findByIdAndClientId(
+        connectionId,
+        clientId
+      )
+  );
 }
+
+
+// ==========================================================
+// ASSERT PLATFORM ENABLED
+// ==========================================================
+//
+// A stored connection must not be used if the platform
+// has been disabled for the current client.
+//
+// ==========================================================
 
 async function assertPlatformEnabled({
   clientId,
@@ -159,7 +197,9 @@ async function assertPlatformEnabled({
   const enabled =
     await clientRepository
       .isPlatformEnabled(
-        Number(clientId),
+        Number(
+          clientId
+        ),
         platform
       );
 
@@ -172,11 +212,12 @@ async function assertPlatformEnabled({
   }
 }
 
+
 // ==========================================================
 // VERIFY SOCIAL CONNECTION
 // ==========================================================
 //
-// Generic platform router:
+// Generic platform verification router:
 //
 // FACEBOOK
 //     ↓
@@ -186,19 +227,30 @@ async function assertPlatformEnabled({
 //     ↓
 // verifyInstagramConnection()
 //
-// Future platforms are added here.
+// TELEGRAM
+//     ↓
+// verifyStoredTelegramConnection()
+//
+// Additional platforms will be added here later.
+//
 // ==========================================================
 
 async function verifyConnection({
   clientId,
   connectionId,
 }) {
+
+  // ========================================================
+  // 1. GET CONNECTION BELONGING TO CLIENT
+  // ========================================================
+
   const connection =
     await socialConnectionRepository
       .findByIdAndClientId(
         connectionId,
         clientId
       );
+
 
   if (!connection) {
     throw createServiceError(
@@ -208,11 +260,22 @@ async function verifyConnection({
     );
   }
 
+
+  // ========================================================
+  // 2. VERIFY PLATFORM IS STILL ENABLED
+  // ========================================================
+
   await assertPlatformEnabled({
     clientId,
+
     platform:
       connection.platform,
   });
+
+
+  // ========================================================
+  // 3. VERIFY CLIENT CONNECTION IS ACTIVE
+  // ========================================================
 
   if (
     connection
@@ -226,18 +289,73 @@ async function verifyConnection({
     );
   }
 
+
+  // ========================================================
+  // 4. NORMALIZE PLATFORM
+  // ========================================================
+
   const platform =
     String(
-      connection.platform || ''
+      connection.platform ||
+      ''
     )
       .trim()
       .toUpperCase();
 
-  switch (platform) {
+
+  // ========================================================
+  // 5. PLATFORM VERIFICATION ROUTER
+  // ========================================================
+
+  switch (
+  platform
+  ) {
+
+    // ------------------------------------------------------
+    // FACEBOOK
+    // ------------------------------------------------------
+
     case 'FACEBOOK':
-      return verifyFacebookConnection(
+      return (
+        verifyFacebookConnection(
+          connection
+        )
+      );
+
+
+    // ------------------------------------------------------
+    // INSTAGRAM
+    // ------------------------------------------------------
+
+    case 'INSTAGRAM':
+      return (
+        verifyInstagramConnection(
+          connection
+        )
+      );
+
+
+    // ------------------------------------------------------
+    // TELEGRAM
+    // ------------------------------------------------------
+
+    case 'TELEGRAM':
+      return (
+        verifyStoredTelegramConnection(
+          connection
+        )
+      );
+// ------------------------------------------------------
+    // THREADS
+    // ------------------------------------------------------
+
+    case 'THREADS':
+      return verifyStoredThreadsConnection(
         connection
       );
+    // ------------------------------------------------------
+    // UNSUPPORTED PLATFORM
+    // ------------------------------------------------------
 
     default:
       throw createServiceError(
@@ -262,18 +380,25 @@ async function verifyConnection({
 // connection
 //
 // It does NOT delete the global token/account record.
+//
 // ==========================================================
 
 async function disconnectConnection({
   clientId,
   connectionId,
 }) {
+
+  // ========================================================
+  // 1. VERIFY CONNECTION EXISTS FOR CLIENT
+  // ========================================================
+
   const existing =
     await socialConnectionRepository
       .findByIdAndClientId(
         connectionId,
         clientId
       );
+
 
   if (!existing) {
     throw createServiceError(
@@ -283,11 +408,22 @@ async function disconnectConnection({
     );
   }
 
+
+  // ========================================================
+  // 2. VERIFY PLATFORM IS ENABLED
+  // ========================================================
+
   await assertPlatformEnabled({
     clientId,
+
     platform:
       existing.platform,
   });
+
+
+  // ========================================================
+  // 3. SOFT DISCONNECT CLIENT RELATIONSHIP
+  // ========================================================
 
   const connection =
     await socialConnectionRepository
@@ -296,6 +432,7 @@ async function disconnectConnection({
         connectionId,
       });
 
+
   if (!connection) {
     throw createServiceError(
       'Social connection could not be disconnected.',
@@ -303,6 +440,11 @@ async function disconnectConnection({
       'SOCIAL_CONNECTION_DISCONNECT_FAILED'
     );
   }
+
+
+  // ========================================================
+  // 4. SAFE RESPONSE
+  // ========================================================
 
   return {
     connectionId:
@@ -332,7 +474,6 @@ async function disconnectConnection({
       connection.updated_at,
   };
 }
-
 
 
 // ==========================================================

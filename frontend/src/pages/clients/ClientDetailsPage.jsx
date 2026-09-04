@@ -313,6 +313,18 @@ export default function ClientDetailsPage() {
     );
   }
 
+  function handleEditPlatforms() {
+    if (
+      !isClientAdmin
+    ) {
+      return;
+    }
+
+    navigate(
+      '/client/edit'
+    );
+  }
+
   /**
    * --------------------------------------------------
    * LOADING
@@ -408,11 +420,8 @@ export default function ClientDetailsPage() {
         onUsers={
           handleUsers
         }
-        onSocialConnections={
-          handleSocialConnections
-        }
-        canManageSocialConnections={
-          canManageSocialConnections
+        showBackButton={
+          !isClientAdmin
         }
       />
 
@@ -540,33 +549,50 @@ export default function ClientDetailsPage() {
 
       <section className="client-info-card">
 
-        <div className="client-info-card__header">
+        <div className="client-info-card__header client-info-card__header--platforms">
 
           <div>
-            <h2>
-              Social Platforms
-            </h2>
+            <div className="client-platform-heading-row">
+              <h2>
+                Social Platforms
+              </h2>
+
+              <span className="client-platform-count">
+                {
+                  clientPlatforms.length
+                }
+                {' '}
+                enabled
+              </span>
+            </div>
 
             <p>
-              Platforms enabled for
-              this client.
+              Control the publishing platforms available
+              to this client and manage their connected accounts.
             </p>
           </div>
 
-          {/*
-           * Only CLIENT_ADMIN can manage
-           * social connections.
-           */}
-          {canManageSocialConnections && (
-            <button
-              type="button"
-              className="client-info-card__action"
-              onClick={
-                handleSocialConnections
-              }
-            >
-              Manage Connections
-            </button>
+          {isClientAdmin && (
+            <div className="client-info-card__actions">
+
+              <Button
+                variant="secondary"
+                onClick={
+                  handleEditPlatforms
+                }
+              >
+                Edit Platforms
+              </Button>
+
+              <Button
+                onClick={
+                  handleSocialConnections
+                }
+              >
+                Manage Connections
+              </Button>
+
+            </div>
           )}
 
         </div>
@@ -604,67 +630,6 @@ export default function ClientDetailsPage() {
                 No social platforms configured.
               </div>
             )}
-
-        </div>
-
-      </section>
-
-      {/* ============================================
-          CLIENT SETUP
-          ============================================ */}
-
-      <section className="client-setup-card">
-
-        <div>
-          <span className="client-setup-card__eyebrow">
-            Client Setup
-          </span>
-
-          <h2>
-            Configure this client
-          </h2>
-
-          {canManageSocialConnections
-            ? (
-              <p>
-                Manage client users and
-                connect the social accounts
-                that will be used for
-                automated content publishing.
-              </p>
-            )
-            : (
-              <p>
-                Manage the users assigned
-                to this client.
-              </p>
-            )}
-        </div>
-
-        <div className="client-setup-card__actions">
-
-          <Button
-            variant="secondary"
-            onClick={
-              handleUsers
-            }
-          >
-            Manage Users
-          </Button>
-
-          {/*
-           * Only CLIENT_ADMIN can configure
-           * social accounts.
-           */}
-          {canManageSocialConnections && (
-            <Button
-              onClick={
-                handleSocialConnections
-              }
-            >
-              Configure Social Connections
-            </Button>
-          )}
 
         </div>
 
@@ -725,23 +690,24 @@ function ClientHeader({
   client,
   onBack,
   onUsers,
-  onSocialConnections,
-  canManageSocialConnections,
+  showBackButton,
 }) {
   return (
     <header className="client-details-header">
 
       <div>
 
-        <button
-          type="button"
-          className="client-back-button"
-          onClick={
-            onBack
-          }
-        >
-          ← Back to Clients
-        </button>
+        {showBackButton && (
+          <button
+            type="button"
+            className="client-back-button"
+            onClick={
+              onBack
+            }
+          >
+            ← Back to Clients
+          </button>
+        )}
 
         <div className="client-heading">
 
@@ -796,21 +762,6 @@ function ClientHeader({
         >
           Manage Users
         </Button>
-
-        {/*
-         * PLATFORM_ADMIN will not see this.
-         *
-         * CLIENT_ADMIN will see it.
-         */}
-        {canManageSocialConnections && (
-          <Button
-            onClick={
-              onSocialConnections
-            }
-          >
-            Social Connections
-          </Button>
-        )}
 
       </div>
 

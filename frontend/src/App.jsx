@@ -1,10 +1,13 @@
 import {
   Navigate,
-  Outlet,
-  useLocation, Route, Routes
+  Route,
+  Routes,
 } from 'react-router-dom';
 
-import { AppLayout } from './layouts/AppLayout.jsx';
+import {
+  AppLayout,
+} from './layouts/AppLayout.jsx';
+
 import {
   ProtectedRoute,
   AdminRoute,
@@ -12,54 +15,113 @@ import {
   ClientManagementRoute,
 } from './routes/ProtectedRoute.jsx';
 
-import { Toaster } from './components/Toaster.jsx';
+import {
+  Toaster,
+} from './components/Toaster.jsx';
 
-import LoginPage from './pages/LoginPage.jsx';
-import DashboardPage from './pages/DashboardPage.jsx';
-import PostsPage from './pages/PostsPage.jsx';
-import PostEditorPage from './pages/PostEditorPage.jsx';
-import ApprovalPage from './pages/ApprovalPage.jsx';
-import PublishPage from './pages/PublishPage.jsx';
-import PublishJobPage from './pages/PublishJobPage.jsx';
-import AuditPage from './pages/AuditPage.jsx';
-import UsersPage from './pages/UsersPage.jsx';
-import UserCreatePage from './pages/UserCreatePage.jsx';
-import AccountPage from './pages/AccountPage.jsx';
-import NotFoundPage from './pages/NotFoundPage.jsx';
-import SocialConnections from './pages/clients/SocialConnections.jsx';
-import AddClientPage from './pages/clients/AddClientPage.jsx';
-import ClientsPage from './pages/clients/ClientsPage.jsx';
-import ClientDetailsPage from './pages/clients/ClientDetailsPage.jsx';
-import ClientUsersPage
-  from './pages/clients/ClientUsersPage.jsx';
+import LoginPage
+  from './pages/LoginPage.jsx';
+
+import DashboardPage
+  from './pages/DashboardPage.jsx';
+
+import PostsPage
+  from './pages/PostsPage.jsx';
+
+import PostEditorPage
+  from './pages/PostEditorPage.jsx';
+
+import ApprovalPage
+  from './pages/ApprovalPage.jsx';
+
+import PublishPage
+  from './pages/PublishPage.jsx';
+
+import PublishJobPage
+  from './pages/PublishJobPage.jsx';
+
+import AuditPage
+  from './pages/AuditPage.jsx';
+
+import UsersPage
+  from './pages/UsersPage.jsx';
+
+import UserCreatePage
+  from './pages/UserCreatePage.jsx';
+
+import AccountPage
+  from './pages/AccountPage.jsx';
+
+import NotFoundPage
+  from './pages/NotFoundPage.jsx';
+
 import ChangePasswordPage
   from './pages/ChangePasswordPage.jsx';
+
+import SocialConnections
+  from './pages/clients/SocialConnections.jsx';
+
+import AddClientPage
+  from './pages/clients/AddClientPage.jsx';
+
+import ClientsPage
+  from './pages/clients/ClientsPage.jsx';
+
+import ClientDetailsPage
+  from './pages/clients/ClientDetailsPage.jsx';
+
+import ClientUsersPage
+  from './pages/clients/ClientUsersPage.jsx';
+
+import ClientUserDetailsPage
+  from './pages/clients/ClientUserDetailsPage.jsx';
+import ClientEditPage
+  from './pages/clients/ClientEditPage.jsx';
+import ClientOnboardingPage
+  from './pages/clients/ClientOnboardingPage.jsx';
+
+import {
+  ClientOnboardingGate,
+} from './routes/ClientOnboardingGate.jsx';
+
 export default function App() {
   return (
     <>
       <Routes>
 
-        {/* ============================= */}
+        {/* ============================================= */}
         {/* PUBLIC */}
-        {/* ============================= */}
+        {/* ============================================= */}
 
         <Route
           path="/login"
-          element={<LoginPage />}
+          element={
+            <LoginPage />
+          }
         />
 
 
-        {/* ============================= */}
+        {/* ============================================= */}
         {/* PROTECTED APPLICATION */}
-        {/* ============================= */}
+        {/* ============================================= */}
 
         <Route
           element={
             <ProtectedRoute>
-              <AppLayout />
+
+              <ClientOnboardingGate>
+
+                <AppLayout />
+
+              </ClientOnboardingGate>
+
             </ProtectedRoute>
           }
         >
+
+          {/* ------------------------------------------- */}
+          {/* DEFAULT */}
+          {/* ------------------------------------------- */}
 
           <Route
             path="/"
@@ -71,58 +133,115 @@ export default function App() {
             }
           />
 
+
+          {/* ------------------------------------------- */}
+          {/* DASHBOARD */}
+          {/* ------------------------------------------- */}
+
           <Route
             path="/dashboard"
             element={
-              <ProtectedRoute>
-                <DashboardPage />
-              </ProtectedRoute>
+              <DashboardPage />
             }
           />
 
+
+          {/* ------------------------------------------- */}
+          {/* CONTENT */}
+          {/* ------------------------------------------- */}
+
           <Route
             path="/posts"
-            element={<PostsPage />}
+            element={
+              <PostsPage />
+            }
           />
 
           <Route
             path="/posts/new"
             element={
-              <PostEditorPage mode="create" />
+              <PostEditorPage
+                mode="create"
+              />
             }
           />
 
           <Route
             path="/posts/:id"
             element={
-              <PostEditorPage mode="edit" />
+              <PostEditorPage
+                mode="edit"
+              />
+            }
+          />
+
+
+          {/* ------------------------------------------- */}
+          {/* APPROVAL */}
+          {/* ------------------------------------------- */}
+
+          <Route
+            path="/approval"
+            element={
+              <ApprovalPage />
+            }
+          />
+
+
+          {/* ------------------------------------------- */}
+          {/* PUBLISHING */}
+          {/* ------------------------------------------- */}
+
+          <Route
+            path="/publish"
+            element={
+              <PublishPage />
             }
           />
 
           <Route
-            path="/approval"
-            element={<ApprovalPage />}
-          />
-
-          <Route
-            path="/publish"
-            element={<PublishPage />}
-          />
-
-          <Route
             path="/publish/:jobId"
-            element={<PublishJobPage />}
+            element={
+              <PublishJobPage />
+            }
           />
+
+
+          {/* ------------------------------------------- */}
+          {/* AUDIT */}
+          {/* ------------------------------------------- */}
 
           <Route
             path="/audit"
-            element={<AuditPage />}
+            element={
+              <AuditPage />
+            }
           />
+
+
+          {/* ------------------------------------------- */}
+          {/* ACCOUNT */}
+          {/* ------------------------------------------- */}
 
           <Route
             path="/account"
-            element={<AccountPage />}
+            element={
+              <AccountPage />
+            }
           />
+
+          <Route
+            path="/change-password"
+            element={
+              <ChangePasswordPage />
+            }
+          />
+
+
+          {/* ============================================= */}
+          {/* PLATFORM ADMIN - CLIENT MANAGEMENT */}
+          {/* ============================================= */}
+
           <Route
             path="/clients"
             element={
@@ -131,6 +250,38 @@ export default function App() {
               </AdminRoute>
             }
           />
+
+          <Route
+            path="/clients/new"
+            element={
+              <AdminRoute>
+                <AddClientPage />
+              </AdminRoute>
+            }
+          />
+
+
+          {/* ============================================= */}
+          {/* ACTIVE CLIENT */}
+          {/* ============================================= */}
+          {/*
+           *
+           * No clientId is exposed in these URLs.
+           *
+           * Backend determines client through:
+           *
+           * PLATFORM_ADMIN:
+           *   req.session.activeClientId
+           *
+           * CLIENT_ADMIN:
+           *   req.user.client_id
+           *
+           * requireActiveClient
+           *   ↓
+           * req.clientId
+           *
+           */}
+
           <Route
             path="/client"
             element={
@@ -139,6 +290,16 @@ export default function App() {
               </ClientManagementRoute>
             }
           />
+          <Route
+            path="/client/onboarding"
+            element={
+              <ClientOnboardingPage />
+            }
+          />
+
+          {/* ============================================= */}
+          {/* CLIENT USERS */}
+          {/* ============================================= */}
 
           <Route
             path="/client/users"
@@ -149,17 +310,39 @@ export default function App() {
             }
           />
 
+
+          {/* ============================================= */}
+          {/* CLIENT USER DETAILS */}
+          {/* ============================================= */}
+          {/*
+           *
+           * Browser URL contains userId only.
+           *
+           * Example:
+           *
+           * /client/users/15
+           *
+           * Backend still verifies:
+           *
+           * user_id = 15
+           * AND
+           * client_id = req.clientId
+           *
+           */}
+
           <Route
-            path="/change-password"
+            path="/client/users/:userId"
             element={
-              <ProtectedRoute>
-                <ChangePasswordPage />
-              </ProtectedRoute>
+              <ClientManagementRoute>
+                <ClientUserDetailsPage />
+              </ClientManagementRoute>
             }
           />
-          {/* ============================= */}
-          {/* ADMIN */}
-          {/* ============================= */}
+
+
+          {/* ============================================= */}
+          {/* PLATFORM ADMIN USER MANAGEMENT */}
+          {/* ============================================= */}
 
           <Route
             path="/users"
@@ -169,14 +352,7 @@ export default function App() {
               </AdminRoute>
             }
           />
-          <Route
-            path="/clients/new"
-            element={
-              <AdminRoute>
-                <AddClientPage />
-              </AdminRoute>
-            }
-          />
+
           <Route
             path="/internal/user-create"
             element={
@@ -187,26 +363,40 @@ export default function App() {
           />
 
 
-          {/* ============================= */}
+          {/* ============================================= */}
           {/* SOCIAL CONNECTIONS */}
-          {/* ============================= */}
+          {/* ============================================= */}
 
           <Route
             path="/client/social-connections"
             element={
               <ClientAdminRoute>
                 <SocialConnections />
-              </ClientAdminRoute>}
+              </ClientAdminRoute>
+            }
           />
 
-
-          {/* ============================= */}
+          <Route
+            path="/client/edit"
+            element={
+              <ClientAdminRoute>
+                <ClientEditPage />
+              </ClientAdminRoute>
+            }
+          />
+          {/* ============================================= */}
           {/* 404 */}
-          {/* ============================= */}
+          {/* ============================================= */}
 
-          <Route path="*" element={<NotFoundPage />} />
+          <Route
+            path="*"
+            element={
+              <NotFoundPage />
+            }
+          />
 
         </Route>
+
       </Routes>
 
       <Toaster />

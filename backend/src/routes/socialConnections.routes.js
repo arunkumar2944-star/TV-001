@@ -10,16 +10,21 @@ const {
 );
 
 const {
-  clientOwnerOnly,
+  authorize,
 } = require(
   '../middleware/authorize'
 );
 
 const {
-  requireActiveClient,
+  requireClientAccess,
 } = require(
-  '../middleware/activeclient.middleware'
+  '../middleware/clientAccess'
 );
+
+
+/* =========================================================
+ * GENERIC SOCIAL CONNECTION CONTROLLER
+ * ========================================================= */
 
 const {
   getClientSocialConnections,
@@ -29,119 +34,238 @@ const {
   '../controllers/socialConnections.controller'
 );
 
+
+/* =========================================================
+ * THREADS CONTROLLER
+ * ========================================================= */
+
+const {
+  startThreadsOAuth,
+  threadsOAuthCallback,
+  getThreadsOAuthResult,
+  testThreadsConnection,
+} = require(
+  '../controllers/threads.controller'
+);
+
+
+/* =========================================================
+ * YOUTUBE CONTROLLER
+ * ========================================================= */
+
+const {
+  startYouTubeOAuth,
+  youtubeOAuthCallback,
+  getYouTubeOAuthResult,
+  testYouTubeConnection,
+} = require(
+  '../controllers/youtube.controller'
+);
+
+
 const router =
   express.Router();
 
-/**
- * --------------------------------------------------
- * SOCIAL CONNECTION SECURITY
- * --------------------------------------------------
- *
- * These routes belong to the client.
- *
- * Only CLIENT_ADMIN can:
- *
- * - View connected social accounts
- * - Verify connections
- * - Disconnect connections
- *
- * PLATFORM_ADMIN can view which platforms
- * are enabled for the client from the
- * client details page, but cannot access
- * connection credentials or manage accounts.
- *
- * Middleware order:
- *
- * authenticate
- *      ↓
- * clientOwnerOnly
- *      ↓
- * requireActiveClient
- *      ↓
- * controller
- */
-const socialConnectionGuards = [
+
+/* =========================================================
+ * AUTHORIZATION
+ * ========================================================= */
+
+const connectionAdmins =
+  authorize(
+    'PLATFORM_ADMIN',
+    'CLIENT_ADMIN',
+  );
+
+
+const guards = [
   authenticate,
-  clientOwnerOnly,
-  requireActiveClient,
+  connectionAdmins,
+  requireClientAccess,
 ];
 
+
+/* =========================================================
+ * THREADS OAUTH CALLBACK
+ * ========================================================= */
+
 /**
- * ==================================================
- * GET ACTIVE CLIENT SOCIAL CONNECTIONS
- * ==================================================
+ * Meta redirects here.
  *
- * GET
- * /api/client/social-connections
+ * Do not accept client ID from OAuth
+ * query parameters.
  *
- * CLIENT_ADMIN only.
- *
- * Client identification:
- *
- * req.session.activeClientId
- *          ↓
- * requireActiveClient
- *          ↓
- * req.clientId
+ * Client context is stored in the session.
  */
 router.get(
-  '/client/social-connections',
-  ...socialConnectionGuards,
-  getClientSocialConnections
+  '/social-connections/threads/oauth/callback',
+
+  threadsOAuthCallback,
 );
 
+
+/* =========================================================
+ * YOUTUBE OAUTH CALLBACK
+ * ========================================================= */
+
 /**
- * ==================================================
- * VERIFY / TEST SOCIAL CONNECTION
- * ==================================================
+ * Google redirects here.
  *
- * POST
- * /api/client/social-connections/:connectionId/verify
+ * This callback intentionally does not use
+ * authenticate / requireClientAccess because
+ * Google is redirecting the browser.
  *
- * CLIENT_ADMIN only.
+ * OAuth state + client/user context are
+ * validated from the existing session.
+ */
+router.get(
+  '/social-connections/youtube/oauth/callback',
+
+  youtubeOAuthCallback,
+);
+
+
+/* =========================================================
+ * THREADS CONNECT / RECONNECT
+ * ========================================================= */
+
+router.get(
+  '/clients/:clientId/social-connections/threads/oauth/start',
+
+  ...guards,
+
+  startThreadsOAuth,
+);
+
+
+router.get(
+  '/clients/:clientId/social-connections/threads/oauth/result',
+
+  ...guards,
+
+  getThreadsOAuthResult,
+);
+
+
+/* =========================================================
+ * THREADS TEST CONNECTION
+ * ========================================================= */
+
+router.post(
+  '/clients/:clientId/social-connections/threads/:connectionId/test',
+
+  ...guards,
+
+  testThreadsConnection,
+);
+
+
+/* =========================================================
+ * YOUTUBE CONNECT / RECONNECT
+ * ========================================================= */
+
+/**
+ * Start Google OAuth.
+ */
+router.get(
+  '/clients/:clientId/social-connections/youtube/oauth/start',
+
+  ...guards,
+
+  startYouTubeOAuth,
+);
+
+
+/**
+ * React consumes OAuth result after Google
+ * redirects back through our backend.
+ */
+router.get(
+  '/clients/:clientId/social-connections/youtube/oauth/result',
+
+  ...guards,
+
+  getYouTubeOAuthResult,
+);
+
+
+/* =========================================================
+ * YOUTUBE TEST CONNECTION
+ * ========================================================= */
+
+/**
+ * Verifies channel access.
  *
- * Supports:
- *
- * - Facebook
- * - Instagram
- *
- * Later:
- *
- * - WhatsApp
- * - YouTube
- * - Telegram
- * - X
- * - Threads
+ * The service automatically refreshes
+ * an expired access token when a valid
+ * refresh token is available.
  */
 router.post(
-  '/client/social-connections/:connectionId/verify',
-  ...socialConnectionGuards,
-  verifySocialConnection
+  '/clients/:clientId/social-connections/youtube/:connectionId/test',
+
+  ...guards,
+
+  testYouTubeConnection,
 );
 
+
+/* =========================================================
+ * GENERIC CONNECTION LIST
+ * ========================================================= */
+
+router.get(
+  '/clients/:clientId/social-connections',
+
+  ...guards,
+
+  getClientSocialConnections,
+);
+
+
+/* =========================================================
+ * GENERIC VERIFY
+ * ========================================================= */
+
 /**
- * ==================================================
- * DISCONNECT SOCIAL CONNECTION
- * ==================================================
+ * Existing Facebook etc. verification.
  *
- * DELETE
- * /api/client/social-connections/:connectionId
+ * YouTube and Threads use their dedicated
+ * test endpoints above.
+ */
+router.post(
+  '/clients/:clientId/social-connections/:connectionId/verify',
+
+  ...guards,
+
+  verifySocialConnection,
+);
+
+
+/* =========================================================
+ * GENERIC DISCONNECT
+ * ========================================================= */
+
+/**
+ * Soft disconnect.
  *
- * CLIENT_ADMIN only.
+ * client_social_connections.is_active
+ * becomes FALSE.
  *
- * Only the relationship between the active
- * client and the social connection should be
- * disabled.
+ * social_platform_connections remains so:
  *
- * Shared/global token records should not be
- * deleted unless your service explicitly owns
- * that lifecycle.
+ * - history is retained
+ * - encrypted credentials stay centralized
+ * - reconnecting the same account can reuse
+ *   the existing connection
  */
 router.delete(
-  '/client/social-connections/:connectionId',
-  ...socialConnectionGuards,
-  disconnectConnection
+  '/clients/:clientId/social-connections/:connectionId',
+
+  ...guards,
+
+  disconnectConnection,
 );
+
 
 module.exports =
   router;

@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/api': {
           target: apiTarget,
-          changeOrigin: false,
+          changeOrigin: true,
           // Media streaming needs range requests to pass through untouched.
           configure: (proxy) => {
             proxy.on('error', (error) => {

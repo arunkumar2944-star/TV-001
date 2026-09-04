@@ -3,7 +3,21 @@
 const clientService =
   require('../services/clientService');
 
+// ======================================================
+// HELPERS
+// ======================================================
 
+function resolveActiveClientId(
+  req
+) {
+  return Number(
+    req.clientId ??
+    req.activeClientId ??
+    req.session?.activeClientId ??
+    req.session?.active_client_id ??
+    req.user?.client_id
+  );
+}
 // ======================================================
 // CREATE CLIENT
 // ======================================================
@@ -170,10 +184,189 @@ async function setClientActiveStatus(
   }
 }
 
+async function setActiveClientPlatforms(
+  req,
+  res,
+  next
+) {
+  try {
+    const clientId =
+      Number(
+        req.clientId
+      );
+
+    const client =
+      await clientService
+        .setClientPlatforms({
+          clientId,
+
+          platforms:
+            req.body.platforms,
+        });
+
+    return res
+      .status(200)
+      .json({
+        success: true,
+
+        message:
+          'Client social platforms updated successfully',
+
+        data: {
+          client,
+        },
+      });
+
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ======================================================
+// START ACTIVE CLIENT ONBOARDING
+// ======================================================
+
+async function startActiveClientOnboarding(
+  req,
+  res,
+  next
+) {
+  try {
+    const clientId =
+      resolveActiveClientId(
+        req
+      );
+
+
+    const client =
+      await clientService
+        .startClientOnboarding({
+          clientId,
+        });
+
+
+    return res
+      .status(200)
+      .json({
+        success: true,
+
+        message:
+          client.onboarding_status ===
+          'COMPLETED'
+            ? 'Client onboarding is already completed'
+            : 'Client onboarding started successfully',
+
+        data: {
+          client,
+        },
+      });
+
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ======================================================
+// GET ACTIVE CLIENT ONBOARDING PROGRESS
+// ======================================================
+
+async function getActiveClientOnboardingProgress(
+  req,
+  res,
+  next
+) {
+  try {
+    const clientId =
+      resolveActiveClientId(
+        req
+      );
+
+
+    const clientAdminUserId =
+      Number(
+        req.user?.user_id ??
+        req.user?.id
+      );
+
+
+    const onboarding =
+      await clientService
+        .getClientOnboardingProgress({
+          clientId,
+          clientAdminUserId,
+        });
+
+
+    return res
+      .status(200)
+      .json({
+        success: true,
+
+        data: {
+          onboarding,
+        },
+      });
+
+  } catch (error) {
+    next(error);
+  }
+}
+// ======================================================
+// COMPLETE ACTIVE CLIENT ONBOARDING
+// ======================================================
+
+async function completeActiveClientOnboarding(
+  req,
+  res,
+  next
+) {
+  try {
+    const clientId =
+      resolveActiveClientId(
+        req
+      );
+
+
+    const clientAdminUserId =
+      Number(
+        req.user?.user_id ??
+        req.user?.id
+      );
+
+
+    const onboarding =
+      await clientService
+        .completeClientOnboarding({
+          clientId,
+          clientAdminUserId,
+        });
+
+
+    return res
+      .status(200)
+      .json({
+        success: true,
+
+        message:
+          'Client onboarding completed successfully',
+
+        data: {
+          onboarding,
+        },
+      });
+
+  } catch (error) {
+    next(error);
+  }
+}
 
 module.exports = {
   createClient,
   getClientById,
   listClients,
   setClientActiveStatus,
+  setActiveClientPlatforms,
+  startActiveClientOnboarding,
+  getActiveClientOnboardingProgress,
+  completeActiveClientOnboarding,
 };

@@ -632,7 +632,281 @@ async function setActiveStatus({
   };
 }
 
+// ======================================================
+// UPDATE CLIENT ONBOARDING STATUS
+// ======================================================
 
+async function setOnboardingStatus({
+  clientId,
+  onboardingStatus,
+}) {
+  const updatedClient =
+    await db.queryOne(
+      `
+      UPDATE clients
+
+      SET
+        onboarding_status = $2,
+        updated_at = NOW()
+
+      WHERE
+        client_id = $1
+
+      RETURNING
+        ${PUBLIC_COLUMNS}
+      `,
+      [
+        clientId,
+        onboardingStatus,
+      ]
+    );
+
+
+  if (!updatedClient) {
+    return null;
+  }
+
+
+  /*
+   * Keep the same client response shape
+   * used elsewhere in this repository.
+   */
+  const socialPlatforms =
+    await listEnabledPlatforms(
+      clientId
+    );
+
+
+  return {
+    ...updatedClient,
+
+    social_platforms:
+      socialPlatforms,
+
+    socialPlatforms:
+      socialPlatforms,
+
+    platforms:
+      socialPlatforms,
+
+    platform_codes:
+      socialPlatforms,
+  };
+}
+// ======================================================
+// GET CLIENT ONBOARDING SNAPSHOT
+// ======================================================
+//
+// Returns raw onboarding facts only.
+//
+// Business decisions such as:
+// - which step is complete
+// - overall percentage
+// - whether onboarding may be completed
+//
+// belong in clientService.js.
+//
+// ======================================================
+
+async function getOnboardingSnapshot({
+  clientId,
+  clientAdminUserId,
+}) {
+  return db.queryOne(
+    `
+    SELECT
+      c.client_id,
+      c.client_code,
+      c.business_name,
+      c.onboarding_status,
+      c.is_active,
+
+
+      -- ================================================
+      -- ENABLED PLATFORMS
+      -- ================================================
+
+      COALESCE(
+        (
+          SELECT
+            ARRAY_AGG(
+              LOWER(csp.platform)
+              ORDER BY LOWER(csp.platform)
+            )
+
+          FROM client_social_platforms csp
+
+          WHERE
+            csp.client_id = c.client_id
+            AND csp.is_enabled = TRUE
+        ),
+
+        ARRAY[]::TEXT[]
+      ) AS enabled_platforms,
+
+
+      -- ================================================
+      -- CONNECTED PLATFORMS
+      -- ================================================
+
+      COALESCE(
+        (
+          SELECT
+            ARRAY_AGG(
+              DISTINCT LOWER(spc.platform)
+              ORDER BY LOWER(spc.platform)
+            )
+
+          FROM client_social_connections csc
+
+          JOIN social_platform_connections spc
+            ON spc.connection_id =
+               csc.connection_id
+
+          WHERE
+            csc.client_id =
+              c.client_id
+
+            AND csc.is_active =
+              TRUE
+
+            AND UPPER(spc.status) =
+              'CONNECTED'
+        ),
+
+        ARRAY[]::TEXT[]
+      ) AS connected_platforms,
+
+
+      -- ================================================
+      -- ACTIVE CLIENT ADMINS
+      -- ================================================
+
+      (
+        SELECT
+          COUNT(*)::INT
+
+        FROM client_users u
+
+        WHERE
+          u.client_id =
+            c.client_id
+
+          AND UPPER(u.role) =
+            'CLIENT_ADMIN'
+
+          AND u.is_active =
+            TRUE
+      ) AS client_admin_count,
+
+
+      -- ================================================
+      -- ACTIVE CONTENT CREATORS
+      -- ================================================
+
+      (
+        SELECT
+          COUNT(*)::INT
+
+        FROM client_users u
+
+        WHERE
+          u.client_id =
+            c.client_id
+
+          AND UPPER(u.role) =
+            'CONTENT_CREATOR'
+
+          AND u.is_active =
+            TRUE
+      ) AS content_creator_count,
+
+
+      -- ================================================
+      -- ACTIVE APPROVERS
+      -- ================================================
+
+      (
+        SELECT
+          COUNT(*)::INT
+
+        FROM client_users u
+
+        WHERE
+          u.client_id =
+            c.client_id
+
+          AND UPPER(u.role) =
+            'APPROVER'
+
+          AND u.is_active =
+            TRUE
+      ) AS approver_count,
+
+
+      -- ================================================
+      -- TOTAL ACTIVE USERS
+      -- ================================================
+
+      (
+        SELECT
+          COUNT(*)::INT
+
+        FROM client_users u
+
+        WHERE
+          u.client_id =
+            c.client_id
+
+          AND u.is_active =
+            TRUE
+      ) AS active_user_count,
+
+
+      -- ================================================
+      -- CLIENT ADMIN PASSWORD SECURITY
+      -- ================================================
+
+      COALESCE(
+        (
+          SELECT
+            u.must_change_password
+              IS FALSE
+
+          FROM client_users u
+
+          WHERE
+            u.user_id = $2
+
+            AND u.client_id =
+              c.client_id
+
+            AND UPPER(u.role) =
+              'CLIENT_ADMIN'
+
+            AND u.is_active =
+              TRUE
+
+          LIMIT 1
+        ),
+
+        FALSE
+      ) AS client_admin_password_ready
+
+
+    FROM clients c
+
+    WHERE
+      c.client_id = $1
+
+    LIMIT 1
+    `,
+    [
+      clientId,
+      clientAdminUserId,
+    ]
+  );
+}
 // ======================================================
 // UPDATE CLIENT SOCIAL PLATFORMS
 // ======================================================
@@ -850,7 +1124,8 @@ module.exports = {
   listEnabledPlatforms,
   findEnabledSocialPlatforms,
   updateSocialPlatforms,
-
+  setOnboardingStatus,
+  getOnboardingSnapshot,
   setActiveStatus,
   isPlatformEnabled,
 };
