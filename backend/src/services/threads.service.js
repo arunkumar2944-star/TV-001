@@ -10,8 +10,9 @@ const ApiError =
     require('../utils/ApiError');
 
 const {
-    config,
-} = require('../config/env');
+    threadsConfig,
+    validateThreadsConfig,
+} = require('../config/threads');
 
 const clientRepository =
     require(
@@ -91,19 +92,15 @@ function calculateTokenExpiry(
  * ========================================================= */
 
 function ensureThreadsConfig() {
-    if (
-        !config.meta?.threadsAppId
-    ) {
+    if (!threadsConfig.appId) {
         throw serviceError(
-            'META_THREADS_APP_ID  is not configured.',
+            'META_THREADS_APP_ID is not configured.',
             500,
             'THREADS_CONFIGURATION_ERROR'
         );
     }
 
-    if (
-        !config.meta?.threadsAppSecret
-    ) {
+    if (!threadsConfig.appSecret) {
         throw serviceError(
             'META_THREADS_APP_SECRET is not configured.',
             500,
@@ -111,10 +108,7 @@ function ensureThreadsConfig() {
         );
     }
 
-    if (
-        !config.meta
-            ?.threadsCallbackUrl
-    ) {
+    if (!threadsConfig.callbackUrl) {
         throw serviceError(
             'META_THREADS_CALLBACK_URI is not configured.',
             500,
@@ -344,39 +338,39 @@ async function validateClient(
 // }
 
 async function assertThreadsEnabled(
-  clientId
+    clientId
 ) {
-  const rows =
-    await clientRepository
-      .listEnabledPlatforms(
-        Number(clientId)
-      );
+    const rows =
+        await clientRepository
+            .listEnabledPlatforms(
+                Number(clientId)
+            );
 
-  const platforms =
-    Array.isArray(rows)
-      ? rows.map(
-          (item) =>
-            String(
-              item?.platform ??
-              item?.code ??
-              item
+    const platforms =
+        Array.isArray(rows)
+            ? rows.map(
+                (item) =>
+                    String(
+                        item?.platform ??
+                        item?.code ??
+                        item
+                    )
+                        .trim()
+                        .toLowerCase()
             )
-              .trim()
-              .toLowerCase()
-        )
-      : [];
+            : [];
 
-  if (
-    !platforms.includes(
-      'threads'
-    )
-  ) {
-    throw serviceError(
-      'Threads is not enabled for this client.',
-      409,
-      'CLIENT_PLATFORM_NOT_ENABLED'
-    );
-  }
+    if (
+        !platforms.includes(
+            'threads'
+        )
+    ) {
+        throw serviceError(
+            'Threads is not enabled for this client.',
+            409,
+            'CLIENT_PLATFORM_NOT_ENABLED'
+        );
+    }
 }
 
 
@@ -462,11 +456,11 @@ async function startOAuth({
         new URLSearchParams({
             client_id:
                 String(
-                    config.meta.threadsAppId
+                    threadsConfig.appId
                 ),
+
             redirect_uri:
-                config.meta
-                    .threadsCallbackUrl,
+                threadsConfig.callbackUrl,
 
             scope:
                 THREADS_SCOPES
@@ -514,32 +508,31 @@ async function exchangeCodeForToken(
     }
 
     const response =
-        await axios.post(
-            `${THREADS_API_URL}/oauth/access_token`,
-            null,
-            {
-                params: {
-                    client_id:
-                        config.meta.threadsAppId,
+  await axios.post(
+    `${THREADS_API_URL}/oauth/access_token`,
+    null,
+    {
+      params: {
+        client_id:
+          threadsConfig.appId,
 
-                    client_secret:
-                        config.meta.threadsAppSecret,
+        client_secret:
+          threadsConfig.appSecret,
 
-                    code:
-                        String(code),
+        code:
+          String(code),
 
-                    grant_type:
-                        'authorization_code',
+        grant_type:
+          'authorization_code',
 
-                    redirect_uri:
-                        config.meta
-                            .threadsCallbackUrl,
-                },
+        redirect_uri:
+          threadsConfig.callbackUrl,
+      },
 
-                timeout:
-                    15000,
-            }
-        );
+      timeout:
+        15000,
+    }
+  );
 
     const accessToken =
         response.data
@@ -581,67 +574,65 @@ async function exchangeCodeForToken(
  * ========================================================= */
 
 async function exchangeForLongLivedToken(
-  shortLivedToken
+    shortLivedToken
 ) {
-  ensureThreadsConfig();
+    ensureThreadsConfig();
 
-  if (!shortLivedToken) {
-    throw serviceError(
-      'Short-lived Threads token is required.',
-      400,
-      'THREADS_SHORT_TOKEN_REQUIRED'
-    );
-  }
+    if (!shortLivedToken) {
+        throw serviceError(
+            'Short-lived Threads token is required.',
+            400,
+            'THREADS_SHORT_TOKEN_REQUIRED'
+        );
+    }
 
-  const response =
-    await axios.get(
-      `${THREADS_API_URL}/access_token`,
-      {
-        params: {
-          grant_type:
-            'th_exchange_token',
+ const response =
+  await axios.get(
+    `${THREADS_API_URL}/access_token`,
+    {
+      params: {
+        grant_type:
+          'th_exchange_token',
 
-          client_secret:
-            config.meta
-              .threadsAppSecret,
-        },
+        client_secret:
+          threadsConfig.appSecret,
 
-        headers: {
-          Authorization:
-            `Bearer ${shortLivedToken}`,
-        },
+        access_token:
+          shortLivedToken,
+      },
 
-        timeout: 15000,
-      }
-    );
+      timeout:
+        15000,
+    }
+  );
 
-  const accessToken =
-    response.data
-      ?.access_token;
-
-  if (!accessToken) {
-    throw serviceError(
-      'Long-lived Threads token was not returned.',
-      502,
-      'THREADS_LONG_TOKEN_MISSING'
-    );
-  }
-
-  return {
-    accessToken,
-
-    tokenType:
-      response.data
-        ?.token_type ||
-      'bearer',
-
-    expiresIn:
-      Number(
+    const accessToken =
         response.data
-          ?.expires_in
-      ) ||
-      null,
-  };
+            ?.access_token;
+
+    if (!accessToken) {
+        throw serviceError(
+            'Long-lived Threads token was not returned.',
+            502,
+            'THREADS_LONG_TOKEN_MISSING'
+        );
+    }
+
+    return {
+        accessToken,
+
+        tokenType:
+            response.data
+                ?.token_type ||
+            'bearer',
+
+        expiresIn:
+            Number(
+                response.data
+                    ?.expires_in
+            ) ||
+            null,
+    };
 }
 
 
@@ -650,51 +641,51 @@ async function exchangeForLongLivedToken(
  * ========================================================= */
 
 async function getThreadsProfile(
-  accessToken
+    accessToken
 ) {
-  if (!accessToken) {
-    throw serviceError(
-      'Threads access token is required.',
-      400,
-      'THREADS_ACCESS_TOKEN_REQUIRED'
-    );
-  }
+    if (!accessToken) {
+        throw serviceError(
+            'Threads access token is required.',
+            400,
+            'THREADS_ACCESS_TOKEN_REQUIRED'
+        );
+    }
 
-  const response =
-    await axios.get(
-      `${THREADS_API_URL}/me`,
-      {
-        params: {
-          fields: [
-            'id',
-            'username',
-            'name',
-            'threads_profile_picture_url',
-            'threads_biography',
-          ].join(','),
-        },
+    const response =
+        await axios.get(
+            `${THREADS_API_URL}/me`,
+            {
+                params: {
+                    fields: [
+                        'id',
+                        'username',
+                        'name',
+                        'threads_profile_picture_url',
+                        'threads_biography',
+                    ].join(','),
+                },
 
-        headers: {
-          Authorization:
-            `Bearer ${accessToken}`,
-        },
+                headers: {
+                    Authorization:
+                        `Bearer ${accessToken}`,
+                },
 
-        timeout: 15000,
-      }
-    );
+                timeout: 15000,
+            }
+        );
 
-  const profile =
-    response.data;
+    const profile =
+        response.data;
 
-  if (!profile?.id) {
-    throw serviceError(
-      'Threads profile could not be loaded.',
-      502,
-      'THREADS_PROFILE_MISSING'
-    );
-  }
+    if (!profile?.id) {
+        throw serviceError(
+            'Threads profile could not be loaded.',
+            502,
+            'THREADS_PROFILE_MISSING'
+        );
+    }
 
-  return profile;
+    return profile;
 }
 
 

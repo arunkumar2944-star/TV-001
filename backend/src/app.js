@@ -3,285 +3,146 @@
 /**
  * Express application wiring.
  *
- * Middleware order:
- *
- *  1. Trust proxy / Express settings
- *  2. Helmet
+ * Middleware / route order:
+ *  1. Express / proxy settings
+ *  2. Security headers
  *  3. CORS
  *  4. Request context
  *  5. Body parsing
- *  6. Cookie parser
- *  7. Persistent Express session
- *  8. Rate limiting
+ *  6. Cookie parsing
+ *  7. Persistent session
+ *  8. API rate limiting
  *  9. CSRF cookie initialization
  * 10. CSRF protection
  * 11. Facebook OAuth / connection routes
  * 12. Instagram OAuth / connection routes
- * 13. User routes
- * 14. Client Admin onboarding routes
- * 15. Client user routes
- * 16. Active-client routes
- * 17. Platform-admin routes
- * 18. Client-management routes
- * 19. Application routes
- * 20. Social-connection routes
- * 21. Root / health
- * 22. 404
- * 23. Central error handler
+ * 13. Threads OAuth routes
+ * 14. X OAuth / connection routes
+ * 15. User routes
+ * 16. Client admin onboarding routes
+ * 17. Client user routes
+ * 18. Active-client routes
+ * 19. Platform-admin routes
+ * 20. Client-management routes
+ * 21. Application routes
+ * 22. Social-connection routes
+ * 23. Root / health
+ * 24. 404 handler
+ * 25. Central error handler
  */
 
+// ======================================================
+// DEPENDENCIES
+// ======================================================
 
-const express =
-  require('express');
+const express = require('express');
+const cors = require('cors');
+const session = require('express-session');
+const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 
-const cors =
-  require('cors');
+// ======================================================
+// CONFIGURATION / SESSION
+// ======================================================
 
-const session =
-  require('express-session');
-
-const helmet =
-  require('helmet');
-
-const cookieParser =
-  require('cookie-parser');
-
-
-const {
-  config,
-} = require(
-  './config/env'
-);
-
-
+const { config } = require('./config/env');
 const {
   getPostgresSessionStore,
-} = require(
-  './session/PostgresSessionStore'
-);
-
+} = require('./session/PostgresSessionStore');
 
 // ======================================================
 // ROUTES
 // ======================================================
 
-const routes =
-  require('./routes');
-
-
-const facebookRoutes =
-  require(
-    './routes/facebook.routes'
-  );
-
-
-const instagramRoutes =
-  require(
-    './routes/instagram.routes'
-  );
-
-
-const socialConnectionsRoutes =
-  require(
-    './routes/socialConnections.routes'
-  );
-const threadsRoutes =
-  require(
-    './routes/threads.routes'
-  );
-
-const platformAdminRoutes =
-  require(
-    './routes/platformAdminRoutes'
-  );
-
-
-const clientAdminRoutes =
-  require(
-    './routes/clientAdmin.routes'
-  );
-
-
-const clientRoutes =
-  require(
-    './routes/clientRoutes'
-  );
-
-
-const clientUsersRoutes =
-  require(
-    './routes/clientUsers.routes'
-  );
-
-
-const activeClientRoutes =
-  require(
-    './routes/activeClient.routes'
-  );
-
-
-const userRoutes =
-  require(
-    './routes/userRoutes'
-  );
-
+const routes = require('./routes');
+const facebookRoutes = require('./routes/facebook.routes');
+const instagramRoutes = require('./routes/instagram.routes');
+const threadsRoutes = require('./routes/threads.routes');
+const xRoutes = require('./routes/x.routes');
+const socialConnectionsRoutes = require('./routes/socialConnections.routes');
+const platformAdminRoutes = require('./routes/platformAdminRoutes');
+const clientAdminRoutes = require('./routes/clientAdmin.routes');
+const clientRoutes = require('./routes/clientRoutes');
+const clientUsersRoutes = require('./routes/clientUsers.routes');
+const activeClientRoutes = require('./routes/activeClient.routes');
+const userRoutes = require('./routes/userRoutes');
 
 // ======================================================
-// MIDDLEWARE
+// MIDDLEWARE / UTILITIES
 // ======================================================
 
-const requestContext =
-  require(
-    './middleware/requestContext'
-  );
-
-
+const requestContext = require('./middleware/requestContext');
 const {
   csrfProtection,
   ensureCsrfCookie,
-} = require(
-  './middleware/csrf'
-);
-
-
-const {
-  apiLimiter,
-} = require(
-  './middleware/rateLimiters'
-);
-
-
+} = require('./middleware/csrf');
+const { apiLimiter } = require('./middleware/rateLimiters');
 const {
   errorHandler,
   notFoundHandler,
-} = require(
-  './middleware/errorHandler'
-);
-
-
-const logger =
-  require(
-    './utils/logger'
-  );
-
+} = require('./middleware/errorHandler');
+const logger = require('./utils/logger');
 
 // ======================================================
 // CORS CONFIGURATION
 // ======================================================
 
-function isAllowedDevelopmentOrigin(
-  origin
-) {
-  if (
-    config.isProduction
-  ) {
+function isAllowedDevelopmentOrigin(origin) {
+  if (config.isProduction) {
     return false;
   }
 
   try {
-    const url =
-      new URL(
-        origin
-      );
+    const url = new URL(origin);
 
     return (
-      [
-        'http:',
-        'https:',
-      ].includes(
-        url.protocol
-      ) &&
-      [
-        'localhost',
-        '127.0.0.1',
-      ].includes(
-        url.hostname
-      )
+      ['http:', 'https:'].includes(url.protocol) &&
+      ['localhost', '127.0.0.1'].includes(url.hostname)
     );
-
   } catch {
     return false;
   }
 }
 
-
 function buildCorsOptions() {
-  const allowedOrigins =
-    new Set(
-      config.frontendUrls ||
-      []
-    );
+  const allowedOrigins = new Set(
+    config.frontendUrls || []
+  );
 
   return {
-
-    origin(
-      origin,
-      callback
-    ) {
-
+    origin(origin, callback) {
       /*
-       * Postman / curl / n8n /
-       * server-to-server requests
-       * may not contain Origin.
+       * Postman / curl / n8n / server-to-server requests
+       * may not contain an Origin header.
        */
-      if (
-        !origin
-      ) {
-        return callback(
-          null,
-          true
-        );
+      if (!origin) {
+        return callback(null, true);
       }
 
-
       if (
-        allowedOrigins.has(
-          origin
-        ) ||
-        isAllowedDevelopmentOrigin(
-          origin
-        )
+        allowedOrigins.has(origin) ||
+        isAllowedDevelopmentOrigin(origin)
       ) {
-        return callback(
-          null,
-          true
-        );
+        return callback(null, true);
       }
-
 
       logger.warn(
         'Blocked cross-origin request',
-        {
-          origin,
-        }
+        { origin }
       );
 
-
-      const error =
-        new Error(
-          'Origin not allowed by CORS'
-        );
-
-
-      error.status =
-        403;
-
-      error.statusCode =
-        403;
-
-      error.code =
-        'CORS_ORIGIN_REJECTED';
-
-
-      return callback(
-        error
+      const error = new Error(
+        'Origin not allowed by CORS'
       );
+
+      error.status = 403;
+      error.statusCode = 403;
+      error.code = 'CORS_ORIGIN_REJECTED';
+
+      return callback(error);
     },
 
-
-    credentials:
-      true,
-
+    credentials: true,
 
     methods: [
       'GET',
@@ -292,7 +153,6 @@ function buildCorsOptions() {
       'OPTIONS',
     ],
 
-
     allowedHeaders: [
       'Content-Type',
       'X-CSRF-Token',
@@ -301,7 +161,6 @@ function buildCorsOptions() {
       'Range',
     ],
 
-
     exposedHeaders: [
       'X-Request-Id',
       'Content-Range',
@@ -309,12 +168,9 @@ function buildCorsOptions() {
       'Content-Length',
     ],
 
-
-    maxAge:
-      600,
+    maxAge: 600,
   };
 }
-
 
 // ======================================================
 // SESSION COOKIE CONFIGURATION
@@ -322,67 +178,37 @@ function buildCorsOptions() {
 
 function buildSessionCookieOptions() {
   return {
-
-    httpOnly:
-      true,
-
+    httpOnly: true,
 
     /*
-     * Development:
-     *
-     * http://localhost
-     *
-     * Production:
-     *
-     * HTTPS
+     * Development: HTTP localhost
+     * Production: HTTPS
      */
-    secure:
-      config.nodeEnv ===
-      'production',
-
+    secure: config.nodeEnv === 'production',
 
     /*
      * Required for OAuth top-level redirects.
      */
-    sameSite:
-      'lax',
+    sameSite: 'lax',
 
-
-    maxAge:
-      config.sessionStore
-        .ttlMs,
-
-
-    path:
-      '/',
+    maxAge: config.sessionStore.ttlMs,
+    path: '/',
   };
 }
-
 
 // ======================================================
 // CREATE EXPRESS APP
 // ======================================================
 
 function createApp() {
-
-  const app =
-    express();
-
+  const app = express();
 
   // ====================================================
   // EXPRESS / PROXY CONFIGURATION
   // ====================================================
 
-  app.set(
-    'trust proxy',
-    1
-  );
-
-
-  app.disable(
-    'x-powered-by'
-  );
-
+  app.set('trust proxy', 1);
+  app.disable('x-powered-by');
 
   // ====================================================
   // SECURITY HEADERS
@@ -390,123 +216,52 @@ function createApp() {
 
   app.use(
     helmet({
-
       contentSecurityPolicy: {
-
         directives: {
-
-          defaultSrc: [
-            "'self'",
-          ],
-
-
-          scriptSrc: [
-            "'self'",
-          ],
-
-
-          styleSrc: [
-            "'self'",
-            "'unsafe-inline'",
-          ],
-
-
-          imgSrc: [
-            "'self'",
-            'data:',
-            'blob:',
-          ],
-
-
-          mediaSrc: [
-            "'self'",
-            'blob:',
-          ],
-
-
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'blob:'],
+          mediaSrc: ["'self'", 'blob:'],
           connectSrc: [
             "'self'",
-
-            ...(
-              config.frontendUrls ||
-              []
-            ),
+            ...(config.frontendUrls || []),
           ],
-
-
-          objectSrc: [
-            "'none'",
-          ],
-
-
-          frameAncestors: [
-            "'none'",
-          ],
-
-
-          baseUri: [
-            "'self'",
-          ],
-
-
-          formAction: [
-            "'self'",
-          ],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
         },
       },
 
-
       crossOriginResourcePolicy: {
-
-        policy:
-          'same-site',
+        policy: 'same-site',
       },
-
 
       referrerPolicy: {
-
-        policy:
-          'same-origin',
+        policy: 'same-origin',
       },
 
-
-      hsts:
-        config.isProduction
-
-          ? {
-
-            maxAge:
-              15552000,
-
-
-            includeSubDomains:
-              true,
+      hsts: config.isProduction
+        ? {
+            maxAge: 15552000,
+            includeSubDomains: true,
           }
-
-          : false,
+        : false,
     })
   );
-
 
   // ====================================================
   // CORS
   // ====================================================
 
-  app.use(
-    cors(
-      buildCorsOptions()
-    )
-  );
-
+  app.use(cors(buildCorsOptions()));
 
   // ====================================================
   // REQUEST CONTEXT
   // ====================================================
 
-  app.use(
-    requestContext
-  );
-
+  app.use(requestContext);
 
   // ====================================================
   // BODY PARSING
@@ -514,61 +269,36 @@ function createApp() {
 
   app.use(
     express.json({
+      limit: '2mb',
 
-      limit:
-        '2mb',
-
-
-      verify: (
-        req,
-        _res,
-        buffer
-      ) => {
-
+      verify: (req, _res, buffer) => {
         /*
-         * n8n endpoints may need
-         * the raw body for signature
-         * verification.
+         * n8n endpoints may need the raw body for
+         * signature verification.
          */
-
         if (
-          req.originalUrl
-            .startsWith(
-              '/api/n8n'
-            )
+          req.originalUrl.startsWith(
+            '/api/n8n'
+          )
         ) {
-
-          req.rawBody =
-            buffer.toString(
-              'utf8'
-            );
+          req.rawBody = buffer.toString('utf8');
         }
       },
     })
   );
 
-
   app.use(
     express.urlencoded({
-
-      extended:
-        false,
-
-
-      limit:
-        '1mb',
+      extended: false,
+      limit: '1mb',
     })
   );
-
 
   // ====================================================
   // COOKIE PARSER
   // ====================================================
 
-  app.use(
-    cookieParser()
-  );
-
+  app.use(cookieParser());
 
   // ====================================================
   // PERSISTENT EXPRESS SESSION
@@ -576,151 +306,99 @@ function createApp() {
 
   app.use(
     session({
-
-      name:
-        config.sessionStore
-          .cookieName,
-
-
-      secret:
-        config.sessionSecret,
-
-
-      store:
-        getPostgresSessionStore(),
-
-
-      resave:
-        false,
-
-
-      saveUninitialized:
-        false,
-
+      name: config.sessionStore.cookieName,
+      secret: config.sessionSecret,
+      store: getPostgresSessionStore(),
+      resave: false,
+      saveUninitialized: false,
 
       /*
-       * Refresh session expiry
-       * while the user is active.
+       * Refresh session expiry while the user is active.
        */
-      rolling:
-        true,
+      rolling: true,
 
-
-      cookie:
-        buildSessionCookieOptions(),
+      cookie: buildSessionCookieOptions(),
     })
   );
-
 
   // ====================================================
   // API RATE LIMITING
   // ====================================================
 
-  app.use(
-    '/api',
-    apiLimiter
-  );
-
+  app.use('/api', apiLimiter);
 
   // ====================================================
   // CSRF COOKIE INITIALIZATION
   // ====================================================
 
-  app.use(
-    '/api',
-    ensureCsrfCookie
-  );
-
+  app.use('/api', ensureCsrfCookie);
 
   // ====================================================
   // CSRF PROTECTION
   // ====================================================
 
-  app.use(
-    '/api',
-
-    (
-      req,
-      res,
-      next
-    ) => {
-
-      /*
-       * n8n endpoints use their
-       * own authentication /
-       * signature mechanism.
-       */
-
-      if (
-        req.path.startsWith(
-          '/n8n'
-        )
-      ) {
-
-        return next();
-      }
-
-
-      return csrfProtection(
-        req,
-        res,
-        next
-      );
+  app.use('/api', (req, res, next) => {
+    /*
+     * n8n endpoints use their own authentication /
+     * signature mechanism.
+     */
+    if (req.path.startsWith('/n8n')) {
+      return next();
     }
-  );
 
+    return csrfProtection(req, res, next);
+  });
 
   // ====================================================
   // FACEBOOK OAUTH / CONNECTION ROUTES
   // ====================================================
 
-  app.use(
-    '/api',
-    facebookRoutes
-  );
-
+  app.use('/api', facebookRoutes);
 
   // ====================================================
   // INSTAGRAM OAUTH / CONNECTION ROUTES
   // ====================================================
 
-  app.use(
-    '/api',
-    instagramRoutes
-  );
-// ====================================================
-// THREADS OAUTH ROUTES
-// ====================================================
+  app.use('/api', instagramRoutes);
 
-app.use(
-  '/api',
-  threadsRoutes
-);
+  // ====================================================
+  // THREADS OAUTH / CONNECTION ROUTES
+  // ====================================================
+
+  app.use('/api', threadsRoutes);
+
+  // ====================================================
+  // X OAUTH / CONNECTION ROUTES
+  // ====================================================
+  //
+  // Expected route examples from x.routes.js:
+  // GET  /api/auth/x/callback
+  // GET  /api/client/social-connections/x/oauth/start
+  // GET  /api/client/social-connections/x/oauth/result
+  // POST /api/client/social-connections/x/:connectionId/test
+  //
+  // ====================================================
+
+  app.use('/api', xRoutes);
 
   // ====================================================
   // USER ROUTES
   // ====================================================
 
-  app.use(
-    '/api/users',
-    userRoutes
-  );
-
+  app.use('/api/users', userRoutes);
 
   // ====================================================
   // CLIENT ADMIN ONBOARDING
   // ====================================================
   //
-  // PLATFORM_ADMIN creates the first
-  // CLIENT_ADMIN for the currently
-  // selected client.
+  // PLATFORM_ADMIN creates the first CLIENT_ADMIN for
+  // the currently selected client.
   //
   // POST /api/client/admin
   //
   // IMPORTANT:
-  //
-  // This specific route MUST be mounted
-  // before the generic /api/client router.
+  // This specific route MUST be mounted before the
+  // generic /api/client router.
   //
   // ====================================================
 
@@ -729,7 +407,6 @@ app.use(
     clientAdminRoutes
   );
 
-
   // ====================================================
   // CLIENT USER MANAGEMENT
   // ====================================================
@@ -737,36 +414,19 @@ app.use(
   // GET /api/client/users
   //
   // PLATFORM_ADMIN:
-  //
-  //   Can VIEW users belonging to
-  //   selected active client.
-  //
-  //   Client context:
-  //
-  //   req.session.activeClientId
-  //
+  //   - Views users belonging to the selected client.
+  //   - Client context: req.session.activeClientId
   //
   // CLIENT_ADMIN:
+  //   - Views users belonging to their own client.
+  //   - Can create normal client users.
+  //   - Client context: req.user.client_id
   //
-  //   Can VIEW users belonging to
-  //   their own client.
-  //
-  //   Can CREATE normal client users.
-  //
-  //   Client context:
-  //
-  //   req.user.client_id
-  //
-  //
-  // requireActiveClient resolves both
-  // cases and stores:
-  //
-  // req.clientId
+  // requireActiveClient resolves both cases and stores
+  // the resolved tenant in req.clientId.
   //
   // IMPORTANT:
-  //
-  // This route MUST come before
-  // /api/client.
+  // This route MUST be mounted before /api/client.
   //
   // ====================================================
 
@@ -775,31 +435,21 @@ app.use(
     clientUsersRoutes
   );
 
-
   // ====================================================
   // ACTIVE CLIENT ROUTES
   // ====================================================
   //
-  // Generic active-client routes.
-  //
   // Examples:
+  // GET /api/client
+  // PUT /api/client/platforms
   //
-  // GET  /api/client
-  // PUT  /api/client/platforms
-  //
-  // PLATFORM_ADMIN:
-  //
-  // client comes from:
-  //
+  // PLATFORM_ADMIN client context comes from:
   // req.session.activeClientId
   //
   // IMPORTANT:
-  //
-  // Generic /api/client is intentionally
-  // mounted AFTER:
-  //
-  // /api/client/admin
-  // /api/client/users
+  // Generic /api/client is intentionally mounted after:
+  //   /api/client/admin
+  //   /api/client/users
   //
   // ====================================================
 
@@ -807,7 +457,6 @@ app.use(
     '/api/client',
     activeClientRoutes
   );
-
 
   // ====================================================
   // PLATFORM ADMIN / BOOTSTRAP
@@ -818,106 +467,63 @@ app.use(
     platformAdminRoutes
   );
 
-
   // ====================================================
   // CLIENT MANAGEMENT
   // ====================================================
   //
-  // PLATFORM_ADMIN operations:
-  //
+  // PLATFORM_ADMIN operations, for example:
   // GET  /api/clients
   // POST /api/clients
   //
-  // etc.
-  //
   // ====================================================
 
-  app.use(
-    '/api/clients',
-    clientRoutes
-  );
-
+  app.use('/api/clients', clientRoutes);
 
   // ====================================================
   // APPLICATION ROUTES
   // ====================================================
 
-  app.use(
-    '/api',
-    routes
-  );
-
+  app.use('/api', routes);
 
   // ====================================================
   // SOCIAL CONNECTION ROUTES
   // ====================================================
 
-  app.use(
-    '/api',
-    socialConnectionsRoutes
-  );
-
+  app.use('/api', socialConnectionsRoutes);
 
   // ====================================================
   // ROOT ENDPOINT
   // ====================================================
 
-  app.get(
-    '/',
-
-    (
-      _req,
-      res
-    ) => {
-
-      return res.json({
-
-        success:
-          true,
-
-
-        service:
-          'Content Publishing API',
-
-
-        docs:
-          '/api/health',
-      });
-    }
-  );
-
+  app.get('/', (_req, res) => {
+    return res.json({
+      success: true,
+      service: 'Content Publishing API',
+      docs: '/api/health',
+    });
+  });
 
   // ====================================================
   // 404
   // ====================================================
 
-  app.use(
-    notFoundHandler
-  );
-
+  app.use(notFoundHandler);
 
   // ====================================================
   // CENTRAL ERROR HANDLER
   // ====================================================
 
-  app.use(
-    errorHandler
-  );
-
+  app.use(errorHandler);
 
   return app;
 }
-
 
 // ======================================================
 // EXPORTS
 // ======================================================
 
 module.exports = {
-
   createApp,
-
   buildCorsOptions,
-
   buildSessionCookieOptions,
 };

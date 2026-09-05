@@ -1,50 +1,64 @@
 'use strict';
 
-const { config } = require('./env');
+function requireEnv(name) {
+  const value =
+    String(
+      process.env[name] || ''
+    ).trim();
 
-/**
- * Threads-specific configuration.
- *
- * Threads has its own App ID / App Secret in the Meta App Dashboard.
- * We prefer dedicated environment variables and keep the existing Meta
- * values only as a compatibility fallback for projects where both products
- * use the same configured credentials.
- */
-const threadsConfig = Object.freeze({
+  if (!value) {
+    throw new Error(
+      `${name} is not configured.`
+    );
+  }
+
+  return value;
+}
+
+const threadsConfig = {
   appId:
-    process.env.META_THREADS_APP_ID ||
-    config.meta?.threadsAppId ||
-    config.meta?.appId ||
-    null,
+    process.env.META_THREADS_APP_ID
+      ? String(
+          process.env.META_THREADS_APP_ID
+        ).trim()
+      : '',
 
   appSecret:
-    process.env.META_THREADS_APP_SECRET ||
-    config.meta?.threadsAppSecret ||
-    config.meta?.appSecret ||
-    null,
+    process.env.META_THREADS_APP_SECRET
+      ? String(
+          process.env.META_THREADS_APP_SECRET
+        ).trim()
+      : '',
 
   callbackUrl:
-    process.env.META_THREADS_CALLBACK_URI ||
-    config.meta?.threadsCallbackUrl ||
-    null,
+    process.env.META_THREADS_CALLBACK_URI
+      ? String(
+          process.env.META_THREADS_CALLBACK_URI
+        ).trim()
+      : '',
 
   frontendUrl:
-    config.frontendUrl ||
-    config.frontendUrls?.[0] ||
-    process.env.FRONTEND_URL ||
-    'http://localhost:5173',
+    String(
+      process.env.FRONTEND_URL ||
+      'http://localhost:5173'
+    ).trim(),
+};
 
-  authorizationUrl: 'https://threads.net/oauth/authorize',
-  apiUrl: 'https://graph.threads.net',
+function validateThreadsConfig() {
+  requireEnv(
+    'META_THREADS_APP_ID'
+  );
 
-  // Keep publish permission now so the client will not have to authorize
-  // Threads again when the publishing phase is added later.
-  scopes: Object.freeze([
-    'threads_basic',
-    'threads_content_publish',
-  ]),
-});
+  requireEnv(
+    'META_THREADS_APP_SECRET'
+  );
+
+  requireEnv(
+    'META_THREADS_CALLBACK_URI'
+  );
+}
 
 module.exports = {
   threadsConfig,
+  validateThreadsConfig,
 };

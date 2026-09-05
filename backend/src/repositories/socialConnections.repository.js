@@ -1,16 +1,25 @@
 'use strict';
 
-const { getPool } = require('../database/pool');
+const {
+  getPool,
+} = require('../database/pool');
+
 
 /*
- * Normalized social connection storage
- * ------------------------------------
- * social_platform_connections = one platform account + encrypted credentials
- * client_social_connections   = client <-> platform-account relationship
+ * ==========================================================
+ * NORMALIZED SOCIAL CONNECTION STORAGE
+ * ==========================================================
  *
- * Public queries alias `status` as `connection_status` so the service/UI
- * contract stays stable while ownership is normalized.
+ * social_platform_connections
+ *   = one global platform account + encrypted credentials
+ *
+ * client_social_connections
+ *   = client <-> platform-account relationship
+ *
+ * Public queries intentionally exclude encrypted credentials.
+ * ==========================================================
  */
+
 
 const PUBLIC_SELECT = `
   spc.connection_id,
@@ -22,109 +31,211 @@ const PUBLIC_SELECT = `
   spc.token_type,
   spc.permissions,
   spc.metadata,
+
   CASE
-    WHEN csc.is_active = FALSE THEN 'DISCONNECTED'
+    WHEN csc.is_active = FALSE
+      THEN 'DISCONNECTED'
     ELSE spc.status
   END AS connection_status,
+
   csc.is_active AS client_connection_active,
+
   spc.connected_by,
   spc.connected_at,
+
   spc.verified_at,
   spc.last_verified_at,
+
   spc.last_error_code,
   spc.last_error_message,
+
   spc.reconnect_required,
+
   spc.created_at,
   spc.updated_at
 `;
 
+
+/*
+ * Backend-only query fields.
+ *
+ * NEVER return this raw object directly to React.
+ */
 const INTERNAL_SELECT = `
   ${PUBLIC_SELECT},
+
   spc.access_token_encrypted,
   spc.token_iv,
-  spc.token_auth_tag
+  spc.token_auth_tag,
+
+  spc.refresh_token_encrypted,
+  spc.refresh_token_iv,
+  spc.refresh_token_auth_tag
 `;
 
-async function findByClientId(clientId) {
-  const pool = getPool();
-  const result = await pool.query(
-    `
-      SELECT DISTINCT ON (spc.platform)
-        ${PUBLIC_SELECT}
-      FROM client_social_connections csc
-      JOIN social_platform_connections spc
-        ON spc.connection_id = csc.connection_id
-      WHERE csc.client_id = $1
-      ORDER BY
-        spc.platform ASC,
-        csc.is_active DESC,
-        csc.created_at DESC,
-        spc.connection_id DESC
-    `,
-    [clientId]
-  );
+
+// ==========================================================
+// GET CONNECTIONS BY CLIENT
+// ==========================================================
+
+async function findByClientId(
+  clientId
+) {
+  const pool =
+    getPool();
+
+  const result =
+    await pool.query(
+      `
+        SELECT DISTINCT ON (
+          spc.platform
+        )
+          ${PUBLIC_SELECT}
+
+        FROM
+          client_social_connections csc
+
+        JOIN
+          social_platform_connections spc
+            ON spc.connection_id =
+              csc.connection_id
+
+        WHERE
+          csc.client_id = $1
+
+        ORDER BY
+          spc.platform ASC,
+          csc.is_active DESC,
+          csc.created_at DESC,
+          spc.connection_id DESC
+      `,
+      [
+        clientId,
+      ]
+    );
 
   return result.rows;
 }
 
-async function findByIdAndClientId(connectionId, clientId) {
-  const pool = getPool();
-  const result = await pool.query(
-    `
-      SELECT ${INTERNAL_SELECT}
-      FROM client_social_connections csc
-      JOIN social_platform_connections spc
-        ON spc.connection_id = csc.connection_id
-      WHERE spc.connection_id = $1
-        AND csc.client_id = $2
-      LIMIT 1
-    `,
-    [connectionId, clientId]
-  );
 
-  return result.rows[0] ?? null;
+// ==========================================================
+// GET ONE INTERNAL CONNECTION
+// ==========================================================
+
+async function findByIdAndClientId(
+  connectionId,
+  clientId
+) {
+  const pool =
+    getPool();
+
+  const result =
+    await pool.query(
+      `
+        SELECT
+          ${INTERNAL_SELECT}
+
+        FROM
+          client_social_connections csc
+
+        JOIN
+          social_platform_connections spc
+            ON spc.connection_id =
+              csc.connection_id
+
+        WHERE
+          spc.connection_id = $1
+
+          AND csc.client_id = $2
+
+        LIMIT 1
+      `,
+      [
+        connectionId,
+        clientId,
+      ]
+    );
+
+  return (
+    result.rows[0] ??
+    null
+  );
 }
 
-async function findFacebookByClientId(clientId) {
-  const pool = getPool();
-  const result = await pool.query(
-    `
-      SELECT ${INTERNAL_SELECT}
-      FROM client_social_connections csc
-      JOIN social_platform_connections spc
-        ON spc.connection_id = csc.connection_id
-      WHERE csc.client_id = $1
-        AND spc.platform = 'FACEBOOK'
-      ORDER BY
-        csc.is_active DESC,
-        csc.created_at DESC,
-        spc.connection_id DESC
-      LIMIT 1
-    `,
-    [clientId]
-  );
 
-  return result.rows[0] ?? null;
+// ==========================================================
+// GET FACEBOOK CONNECTION
+// ==========================================================
+
+async function findFacebookByClientId(
+  clientId
+) {
+  const pool =
+    getPool();
+
+  const result =
+    await pool.query(
+      `
+        SELECT
+          ${INTERNAL_SELECT}
+
+        FROM
+          client_social_connections csc
+
+        JOIN
+          social_platform_connections spc
+            ON spc.connection_id =
+              csc.connection_id
+
+        WHERE
+          csc.client_id = $1
+
+          AND spc.platform =
+            'FACEBOOK'
+
+        ORDER BY
+          csc.is_active DESC,
+          csc.created_at DESC,
+          spc.connection_id DESC
+
+        LIMIT 1
+      `,
+      [
+        clientId,
+      ]
+    );
+
+  return (
+    result.rows[0] ??
+    null
+  );
 }
 
-/**
- * One Facebook Page is stored once globally and can be linked to many clients.
- * Reconnecting the same Page therefore reuses the same connection_id.
- */
+
+// ==========================================================
+// FACEBOOK UPSERT
+// ==========================================================
+
 async function upsertFacebookConnection({
   clientId,
   connectedBy,
+
   externalAccountId,
   externalAccountName,
+
   encryptedToken,
   iv,
   authTag,
+
   tokenExpiresAt = null,
+
   permissions = [],
   metadata = {},
 }) {
   const normalizedClientId =
-    Number(clientId);
+    Number(
+      clientId
+    );
 
   if (
     !Number.isInteger(
@@ -162,151 +273,152 @@ async function upsertFacebookConnection({
   const db =
     await pool.connect();
 
+
   try {
     await db.query(
       'BEGIN'
     );
 
 
-    /*
-     * ===================================================
-     * GLOBAL FACEBOOK PAGE
-     * ===================================================
-     *
-     * UNIQUE:
-     *
-     * platform + external_account_id
-     *
-     * Therefore the same Facebook Page is stored only
-     * once globally, regardless of how many clients use it.
-     *
-     * Important:
-     *
-     * selectPage() already verifies the Page/token pair
-     * with Meta BEFORE calling this repository.
-     *
-     * Therefore we can safely persist the new credential as
-     * CONNECTED rather than temporarily changing a shared
-     * global connection to PENDING_VERIFICATION.
-     */
+    // ------------------------------------------------------
+    // GLOBAL FACEBOOK PAGE
+    // ------------------------------------------------------
 
     const stored =
       await db.query(
         `
-        INSERT INTO social_platform_connections (
-          platform,
-          external_account_id,
-          external_account_name,
-          access_token_encrypted,
-          token_iv,
-          token_auth_tag,
-          token_expires_at,
-          token_type,
-          permissions,
-          metadata,
-          status,
-          connected_by,
-          connected_at,
-          verified_at,
-          last_verified_at,
-          last_error_code,
-          last_error_message,
-          reconnect_required,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          'FACEBOOK',
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          $6,
-          'PAGE',
-          $7::jsonb,
-          $8::jsonb,
-          'CONNECTED',
-          $9,
-          NOW(),
-          NOW(),
-          NOW(),
-          NULL,
-          NULL,
-          FALSE,
-          NOW(),
-          NOW()
-        )
+          INSERT INTO social_platform_connections
+          (
+            platform,
 
-        ON CONFLICT (
-          platform,
-          external_account_id
-        )
+            external_account_id,
+            external_account_name,
 
-        DO UPDATE SET
-          external_account_name =
-            EXCLUDED.external_account_name,
+            access_token_encrypted,
+            token_iv,
+            token_auth_tag,
 
-          access_token_encrypted =
-            EXCLUDED.access_token_encrypted,
+            token_expires_at,
+            token_type,
 
-          token_iv =
-            EXCLUDED.token_iv,
+            permissions,
+            metadata,
 
-          token_auth_tag =
-            EXCLUDED.token_auth_tag,
+            status,
 
-          token_expires_at =
-            EXCLUDED.token_expires_at,
+            connected_by,
+            connected_at,
 
-          token_type =
-            EXCLUDED.token_type,
+            verified_at,
+            last_verified_at,
 
-          permissions =
-            EXCLUDED.permissions,
+            last_error_code,
+            last_error_message,
 
-          metadata =
-            EXCLUDED.metadata,
+            reconnect_required,
 
-          /*
-           * The new Page/token pair has already been
-           * verified by facebook.service.js.
-           */
-          status =
+            created_at,
+            updated_at
+          )
+
+          VALUES
+          (
+            'FACEBOOK',
+
+            $1,
+            $2,
+
+            $3,
+            $4,
+            $5,
+
+            $6,
+            'PAGE',
+
+            $7::jsonb,
+            $8::jsonb,
+
             'CONNECTED',
 
-          connected_by =
-            EXCLUDED.connected_by,
-
-          connected_at =
+            $9,
             NOW(),
 
-          /*
-           * Preserve the original first-verification time,
-           * but refresh the latest verification time.
-           */
-          verified_at =
-            COALESCE(
-              social_platform_connections.verified_at,
-              NOW()
-            ),
-
-          last_verified_at =
+            NOW(),
             NOW(),
 
-          last_error_code =
+            NULL,
             NULL,
 
-          last_error_message =
-            NULL,
-
-          reconnect_required =
             FALSE,
 
-          updated_at =
+            NOW(),
             NOW()
+          )
 
-        RETURNING *
+          ON CONFLICT
+          (
+            platform,
+            external_account_id
+          )
+
+          DO UPDATE SET
+
+            external_account_name =
+              EXCLUDED.external_account_name,
+
+            access_token_encrypted =
+              EXCLUDED.access_token_encrypted,
+
+            token_iv =
+              EXCLUDED.token_iv,
+
+            token_auth_tag =
+              EXCLUDED.token_auth_tag,
+
+            token_expires_at =
+              EXCLUDED.token_expires_at,
+
+            token_type =
+              EXCLUDED.token_type,
+
+            permissions =
+              EXCLUDED.permissions,
+
+            metadata =
+              EXCLUDED.metadata,
+
+            status =
+              'CONNECTED',
+
+            connected_by =
+              EXCLUDED.connected_by,
+
+            connected_at =
+              NOW(),
+
+            verified_at =
+              COALESCE(
+                social_platform_connections
+                  .verified_at,
+                NOW()
+              ),
+
+            last_verified_at =
+              NOW(),
+
+            last_error_code =
+              NULL,
+
+            last_error_message =
+              NULL,
+
+            reconnect_required =
+              FALSE,
+
+            updated_at =
+              NOW()
+
+          RETURNING *
         `,
         [
           String(
@@ -341,6 +453,7 @@ async function upsertFacebookConnection({
     const connectionRow =
       stored.rows[0];
 
+
     if (!connectionRow) {
       throw new Error(
         'Facebook connection could not be stored.'
@@ -348,38 +461,33 @@ async function upsertFacebookConnection({
     }
 
 
-    /*
-     * ===================================================
-     * ONE ACTIVE FACEBOOK ACCOUNT PER CLIENT
-     * ===================================================
-     *
-     * Keep old links for history but deactivate any other
-     * Facebook Page currently selected by this client.
-     *
-     * This does NOT affect other clients.
-     */
+    // ------------------------------------------------------
+    // ONE ACTIVE FACEBOOK ACCOUNT PER CLIENT
+    // ------------------------------------------------------
 
     await db.query(
       `
-      UPDATE client_social_connections csc
+        UPDATE
+          client_social_connections csc
 
-      SET
-        is_active = FALSE
+        SET
+          is_active = FALSE
 
-      FROM social_platform_connections spc
+        FROM
+          social_platform_connections spc
 
-      WHERE
-        csc.connection_id =
-          spc.connection_id
+        WHERE
+          csc.connection_id =
+            spc.connection_id
 
-        AND csc.client_id =
-          $1
+          AND csc.client_id =
+            $1
 
-        AND spc.platform =
-          'FACEBOOK'
+          AND spc.platform =
+            'FACEBOOK'
 
-        AND csc.connection_id <>
-          $2
+          AND csc.connection_id <>
+            $2
       `,
       [
         normalizedClientId,
@@ -388,43 +496,38 @@ async function upsertFacebookConnection({
     );
 
 
-    /*
-     * ===================================================
-     * CLIENT ↔ GLOBAL CONNECTION
-     * ===================================================
-     *
-     * Existing relationship:
-     *
-     * is_active FALSE → TRUE
-     *
-     * New relationship:
-     *
-     * INSERT
-     */
+    // ------------------------------------------------------
+    // CLIENT ↔ FACEBOOK CONNECTION
+    // ------------------------------------------------------
 
     await db.query(
       `
-      INSERT INTO client_social_connections (
-        client_id,
-        connection_id,
-        is_active,
-        created_at
-      )
-      VALUES (
-        $1,
-        $2,
-        TRUE,
-        NOW()
-      )
+        INSERT INTO client_social_connections
+        (
+          client_id,
+          connection_id,
+          is_active,
+          created_at
+        )
 
-      ON CONFLICT (
-        client_id,
-        connection_id
-      )
+        VALUES
+        (
+          $1,
+          $2,
+          TRUE,
+          NOW()
+        )
 
-      DO UPDATE SET
-        is_active =
-          TRUE
+        ON CONFLICT
+        (
+          client_id,
+          connection_id
+        )
+
+        DO UPDATE SET
+
+          is_active =
+            TRUE
       `,
       [
         normalizedClientId,
@@ -450,31 +553,44 @@ async function upsertFacebookConnection({
       connection_status:
         connectionRow.status,
     };
+
   } catch (error) {
     await db.query(
       'ROLLBACK'
     );
 
     throw error;
+
   } finally {
     db.release();
   }
 }
 
+
+// ==========================================================
+// INSTAGRAM UPSERT
+// ==========================================================
+
 async function upsertInstagramConnection({
   clientId,
   connectedBy,
+
   externalAccountId,
   externalAccountName,
+
   encryptedToken,
   iv,
   authTag,
+
   tokenExpiresAt = null,
+
   permissions = [],
   metadata = {},
 }) {
   const normalizedClientId =
-    Number(clientId);
+    Number(
+      clientId
+    );
 
   if (
     !Number.isInteger(
@@ -487,7 +603,9 @@ async function upsertInstagramConnection({
     );
   }
 
-  if (!externalAccountId) {
+  if (
+    !externalAccountId
+  ) {
     throw new Error(
       'Instagram account ID is required.'
     );
@@ -510,134 +628,152 @@ async function upsertInstagramConnection({
   const db =
     await pool.connect();
 
+
   try {
     await db.query(
       'BEGIN'
     );
 
 
-    /*
-     * ===================================================
-     * GLOBAL INSTAGRAM ACCOUNT
-     * ===================================================
-     *
-     * One Instagram Professional account is stored once.
-     *
-     * UNIQUE:
-     *
-     * platform + external_account_id
-     */
+    // ------------------------------------------------------
+    // GLOBAL INSTAGRAM ACCOUNT
+    // ------------------------------------------------------
 
     const stored =
       await db.query(
         `
-        INSERT INTO social_platform_connections (
-          platform,
-          external_account_id,
-          external_account_name,
-          access_token_encrypted,
-          token_iv,
-          token_auth_tag,
-          token_expires_at,
-          token_type,
-          permissions,
-          metadata,
-          status,
-          connected_by,
-          connected_at,
-          verified_at,
-          last_verified_at,
-          last_error_code,
-          last_error_message,
-          reconnect_required,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          'INSTAGRAM',
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          $6,
-          'PAGE',
-          $7::jsonb,
-          $8::jsonb,
-          'CONNECTED',
-          $9,
-          NOW(),
-          NOW(),
-          NOW(),
-          NULL,
-          NULL,
-          FALSE,
-          NOW(),
-          NOW()
-        )
+          INSERT INTO social_platform_connections
+          (
+            platform,
 
-        ON CONFLICT (
-          platform,
-          external_account_id
-        )
+            external_account_id,
+            external_account_name,
 
-        DO UPDATE SET
-          external_account_name =
-            EXCLUDED.external_account_name,
+            access_token_encrypted,
+            token_iv,
+            token_auth_tag,
 
-          access_token_encrypted =
-            EXCLUDED.access_token_encrypted,
+            token_expires_at,
+            token_type,
 
-          token_iv =
-            EXCLUDED.token_iv,
+            permissions,
+            metadata,
 
-          token_auth_tag =
-            EXCLUDED.token_auth_tag,
+            status,
 
-          token_expires_at =
-            EXCLUDED.token_expires_at,
+            connected_by,
+            connected_at,
 
-          token_type =
-            EXCLUDED.token_type,
+            verified_at,
+            last_verified_at,
 
-          permissions =
-            EXCLUDED.permissions,
+            last_error_code,
+            last_error_message,
 
-          metadata =
-            EXCLUDED.metadata,
+            reconnect_required,
 
-          status =
+            created_at,
+            updated_at
+          )
+
+          VALUES
+          (
+            'INSTAGRAM',
+
+            $1,
+            $2,
+
+            $3,
+            $4,
+            $5,
+
+            $6,
+            'PAGE',
+
+            $7::jsonb,
+            $8::jsonb,
+
             'CONNECTED',
 
-          connected_by =
-            EXCLUDED.connected_by,
-
-          connected_at =
+            $9,
             NOW(),
 
-          verified_at =
-            COALESCE(
-              social_platform_connections
-                .verified_at,
-              NOW()
-            ),
-
-          last_verified_at =
+            NOW(),
             NOW(),
 
-          last_error_code =
+            NULL,
             NULL,
 
-          last_error_message =
-            NULL,
-
-          reconnect_required =
             FALSE,
 
-          updated_at =
+            NOW(),
             NOW()
+          )
 
-        RETURNING *
+          ON CONFLICT
+          (
+            platform,
+            external_account_id
+          )
+
+          DO UPDATE SET
+
+            external_account_name =
+              EXCLUDED.external_account_name,
+
+            access_token_encrypted =
+              EXCLUDED.access_token_encrypted,
+
+            token_iv =
+              EXCLUDED.token_iv,
+
+            token_auth_tag =
+              EXCLUDED.token_auth_tag,
+
+            token_expires_at =
+              EXCLUDED.token_expires_at,
+
+            token_type =
+              EXCLUDED.token_type,
+
+            permissions =
+              EXCLUDED.permissions,
+
+            metadata =
+              EXCLUDED.metadata,
+
+            status =
+              'CONNECTED',
+
+            connected_by =
+              EXCLUDED.connected_by,
+
+            connected_at =
+              NOW(),
+
+            verified_at =
+              COALESCE(
+                social_platform_connections
+                  .verified_at,
+                NOW()
+              ),
+
+            last_verified_at =
+              NOW(),
+
+            last_error_code =
+              NULL,
+
+            last_error_message =
+              NULL,
+
+            reconnect_required =
+              FALSE,
+
+            updated_at =
+              NOW()
+
+          RETURNING *
         `,
         [
           String(
@@ -672,6 +808,7 @@ async function upsertInstagramConnection({
     const connectionRow =
       stored.rows[0];
 
+
     if (!connectionRow) {
       throw new Error(
         'Instagram connection could not be stored.'
@@ -679,37 +816,33 @@ async function upsertInstagramConnection({
     }
 
 
-    /*
-     * ===================================================
-     * ONE ACTIVE INSTAGRAM ACCOUNT PER CLIENT
-     * ===================================================
-     *
-     * Keep old relationship rows for history,
-     * but deactivate any other Instagram account
-     * currently active for this client.
-     */
+    // ------------------------------------------------------
+    // ONE ACTIVE INSTAGRAM ACCOUNT PER CLIENT
+    // ------------------------------------------------------
 
     await db.query(
       `
-      UPDATE client_social_connections csc
+        UPDATE
+          client_social_connections csc
 
-      SET
-        is_active = FALSE
+        SET
+          is_active = FALSE
 
-      FROM social_platform_connections spc
+        FROM
+          social_platform_connections spc
 
-      WHERE
-        csc.connection_id =
-          spc.connection_id
+        WHERE
+          csc.connection_id =
+            spc.connection_id
 
-        AND csc.client_id =
-          $1
+          AND csc.client_id =
+            $1
 
-        AND spc.platform =
-          'INSTAGRAM'
+          AND spc.platform =
+            'INSTAGRAM'
 
-        AND csc.connection_id <>
-          $2
+          AND csc.connection_id <>
+            $2
       `,
       [
         normalizedClientId,
@@ -718,41 +851,38 @@ async function upsertInstagramConnection({
     );
 
 
-    /*
-     * ===================================================
-     * CLIENT ↔ INSTAGRAM ACCOUNT
-     * ===================================================
-     *
-     * New:
-     * INSERT
-     *
-     * Reconnect:
-     * is_active FALSE → TRUE
-     */
+    // ------------------------------------------------------
+    // CLIENT ↔ INSTAGRAM CONNECTION
+    // ------------------------------------------------------
 
     await db.query(
       `
-      INSERT INTO client_social_connections (
-        client_id,
-        connection_id,
-        is_active,
-        created_at
-      )
-      VALUES (
-        $1,
-        $2,
-        TRUE,
-        NOW()
-      )
+        INSERT INTO client_social_connections
+        (
+          client_id,
+          connection_id,
+          is_active,
+          created_at
+        )
 
-      ON CONFLICT (
-        client_id,
-        connection_id
-      )
+        VALUES
+        (
+          $1,
+          $2,
+          TRUE,
+          NOW()
+        )
 
-      DO UPDATE SET
-        is_active =
-          TRUE
+        ON CONFLICT
+        (
+          client_id,
+          connection_id
+        )
+
+        DO UPDATE SET
+
+          is_active =
+            TRUE
       `,
       [
         normalizedClientId,
@@ -778,16 +908,23 @@ async function upsertInstagramConnection({
       connection_status:
         connectionRow.status,
     };
+
   } catch (error) {
     await db.query(
       'ROLLBACK'
     );
 
     throw error;
+
   } finally {
     db.release();
   }
 }
+
+
+// ==========================================================
+// TELEGRAM UPSERT
+// ==========================================================
 
 async function upsertTelegramConnection({
   clientId,
@@ -804,7 +941,9 @@ async function upsertTelegramConnection({
   metadata = {},
 }) {
   const normalizedClientId =
-    Number(clientId);
+    Number(
+      clientId
+    );
 
   if (
     !Number.isInteger(
@@ -851,141 +990,141 @@ async function upsertTelegramConnection({
     );
 
 
-    // ==================================================
-    // 1. STORE / UPDATE GLOBAL TELEGRAM CHANNEL
-    // ==================================================
+    // ------------------------------------------------------
+    // GLOBAL TELEGRAM CHANNEL
+    // ------------------------------------------------------
 
     const stored =
       await db.query(
         `
-        INSERT INTO social_platform_connections
-        (
-          platform,
+          INSERT INTO social_platform_connections
+          (
+            platform,
 
-          external_account_id,
-          external_account_name,
+            external_account_id,
+            external_account_name,
 
-          access_token_encrypted,
-          token_iv,
-          token_auth_tag,
+            access_token_encrypted,
+            token_iv,
+            token_auth_tag,
 
-          token_expires_at,
-          token_type,
+            token_expires_at,
+            token_type,
 
-          permissions,
-          metadata,
+            permissions,
+            metadata,
 
-          status,
+            status,
 
-          connected_by,
-          connected_at,
+            connected_by,
+            connected_at,
 
-          verified_at,
-          last_verified_at,
+            verified_at,
+            last_verified_at,
 
-          last_error_code,
-          last_error_message,
+            last_error_code,
+            last_error_message,
 
-          reconnect_required,
+            reconnect_required,
 
-          created_at,
-          updated_at
-        )
+            created_at,
+            updated_at
+          )
 
-        VALUES
-        (
-          'TELEGRAM',
+          VALUES
+          (
+            'TELEGRAM',
 
-          $1,
-          $2,
+            $1,
+            $2,
 
-          $3,
-          $4,
-          $5,
+            $3,
+            $4,
+            $5,
 
-          NULL,
-          'BOT_TOKEN',
-
-          $6::jsonb,
-          $7::jsonb,
-
-          'PENDING_VERIFICATION',
-
-          $8,
-          NOW(),
-
-          NULL,
-          NULL,
-
-          NULL,
-          NULL,
-
-          FALSE,
-
-          NOW(),
-          NOW()
-        )
-
-        ON CONFLICT
-        (
-          platform,
-          external_account_id
-        )
-
-        DO UPDATE SET
-
-          external_account_name =
-            EXCLUDED.external_account_name,
-
-          access_token_encrypted =
-            EXCLUDED.access_token_encrypted,
-
-          token_iv =
-            EXCLUDED.token_iv,
-
-          token_auth_tag =
-            EXCLUDED.token_auth_tag,
-
-          token_expires_at =
             NULL,
-
-          token_type =
             'BOT_TOKEN',
 
-          permissions =
-            EXCLUDED.permissions,
+            $6::jsonb,
+            $7::jsonb,
 
-          metadata =
-            EXCLUDED.metadata,
-
-          status =
             'PENDING_VERIFICATION',
 
-          connected_by =
-            EXCLUDED.connected_by,
-
-          connected_at =
+            $8,
             NOW(),
 
-          verified_at =
+            NULL,
             NULL,
 
-          last_verified_at =
+            NULL,
             NULL,
 
-          last_error_code =
-            NULL,
-
-          last_error_message =
-            NULL,
-
-          reconnect_required =
             FALSE,
 
-          updated_at =
+            NOW(),
             NOW()
+          )
 
-        RETURNING *
+          ON CONFLICT
+          (
+            platform,
+            external_account_id
+          )
+
+          DO UPDATE SET
+
+            external_account_name =
+              EXCLUDED.external_account_name,
+
+            access_token_encrypted =
+              EXCLUDED.access_token_encrypted,
+
+            token_iv =
+              EXCLUDED.token_iv,
+
+            token_auth_tag =
+              EXCLUDED.token_auth_tag,
+
+            token_expires_at =
+              NULL,
+
+            token_type =
+              'BOT_TOKEN',
+
+            permissions =
+              EXCLUDED.permissions,
+
+            metadata =
+              EXCLUDED.metadata,
+
+            status =
+              'PENDING_VERIFICATION',
+
+            connected_by =
+              EXCLUDED.connected_by,
+
+            connected_at =
+              NOW(),
+
+            verified_at =
+              NULL,
+
+            last_verified_at =
+              NULL,
+
+            last_error_code =
+              NULL,
+
+            last_error_message =
+              NULL,
+
+            reconnect_required =
+              FALSE,
+
+            updated_at =
+              NOW()
+
+          RETURNING *
         `,
         [
           String(
@@ -1026,33 +1165,33 @@ async function upsertTelegramConnection({
     }
 
 
-    // ==================================================
-    // 2. DEACTIVATE OLD TELEGRAM LINK FOR THIS CLIENT
-    // ==================================================
+    // ------------------------------------------------------
+    // ONE ACTIVE TELEGRAM CONNECTION PER CLIENT
+    // ------------------------------------------------------
 
     await db.query(
       `
-      UPDATE
-        client_social_connections csc
+        UPDATE
+          client_social_connections csc
 
-      SET
-        is_active = FALSE
+        SET
+          is_active = FALSE
 
-      FROM
-        social_platform_connections spc
+        FROM
+          social_platform_connections spc
 
-      WHERE
-        csc.connection_id =
-          spc.connection_id
+        WHERE
+          csc.connection_id =
+            spc.connection_id
 
-        AND csc.client_id =
-          $1
+          AND csc.client_id =
+            $1
 
-        AND spc.platform =
-          'TELEGRAM'
+          AND spc.platform =
+            'TELEGRAM'
 
-        AND csc.connection_id <>
-          $2
+          AND csc.connection_id <>
+            $2
       `,
       [
         normalizedClientId,
@@ -1061,38 +1200,38 @@ async function upsertTelegramConnection({
     );
 
 
-    // ==================================================
-    // 3. LINK TELEGRAM CHANNEL TO CLIENT
-    // ==================================================
+    // ------------------------------------------------------
+    // CLIENT ↔ TELEGRAM CONNECTION
+    // ------------------------------------------------------
 
     await db.query(
       `
-      INSERT INTO client_social_connections
-      (
-        client_id,
-        connection_id,
-        is_active,
-        created_at
-      )
+        INSERT INTO client_social_connections
+        (
+          client_id,
+          connection_id,
+          is_active,
+          created_at
+        )
 
-      VALUES
-      (
-        $1,
-        $2,
-        TRUE,
-        NOW()
-      )
+        VALUES
+        (
+          $1,
+          $2,
+          TRUE,
+          NOW()
+        )
 
-      ON CONFLICT
-      (
-        client_id,
-        connection_id
-      )
+        ON CONFLICT
+        (
+          client_id,
+          connection_id
+        )
 
-      DO UPDATE SET
+        DO UPDATE SET
 
-        is_active =
-          TRUE
+          is_active =
+            TRUE
       `,
       [
         normalizedClientId,
@@ -1131,37 +1270,87 @@ async function upsertTelegramConnection({
   }
 }
 
-async function markVerified({ connectionId, externalAccountName }) {
-  const pool = getPool();
-  const result = await pool.query(
-    `
-      UPDATE social_platform_connections
-      SET
-        external_account_name = COALESCE($2, external_account_name),
-        status = 'CONNECTED',
-        verified_at = COALESCE(verified_at, NOW()),
-        last_verified_at = NOW(),
-        reconnect_required = FALSE,
-        last_error_code = NULL,
-        last_error_message = NULL,
-        updated_at = NOW()
-      WHERE connection_id = $1
-      RETURNING
-        connection_id,
-        platform,
-        external_account_id,
-        external_account_name,
-        status AS connection_status,
-        verified_at,
-        last_verified_at,
-        reconnect_required,
-        updated_at
-    `,
-    [connectionId, externalAccountName ?? null]
-  );
 
-  return result.rows[0] ?? null;
+// ==========================================================
+// MARK CONNECTION VERIFIED
+// ==========================================================
+
+async function markVerified({
+  connectionId,
+  externalAccountName,
+}) {
+  const pool =
+    getPool();
+
+  const result =
+    await pool.query(
+      `
+        UPDATE
+          social_platform_connections
+
+        SET
+          external_account_name =
+            COALESCE(
+              $2,
+              external_account_name
+            ),
+
+          status =
+            'CONNECTED',
+
+          verified_at =
+            COALESCE(
+              verified_at,
+              NOW()
+            ),
+
+          last_verified_at =
+            NOW(),
+
+          reconnect_required =
+            FALSE,
+
+          last_error_code =
+            NULL,
+
+          last_error_message =
+            NULL,
+
+          updated_at =
+            NOW()
+
+        WHERE
+          connection_id = $1
+
+        RETURNING
+          connection_id,
+          platform,
+          external_account_id,
+          external_account_name,
+          status AS connection_status,
+          verified_at,
+          last_verified_at,
+          reconnect_required,
+          updated_at
+      `,
+      [
+        connectionId,
+
+        externalAccountName ??
+          null,
+      ]
+    );
+
+  return (
+    result.rows[0] ??
+    null
+  );
 }
+
+
+// ==========================================================
+// MARK VERIFICATION FAILED
+// ==========================================================
 
 async function markVerificationFailed({
   connectionId,
@@ -1169,107 +1358,207 @@ async function markVerificationFailed({
   errorMessage,
   reconnectRequired = false,
 }) {
-  const pool = getPool();
-  const status = reconnectRequired ? 'RECONNECT_REQUIRED' : 'ERROR';
-  const result = await pool.query(
-    `
-      UPDATE social_platform_connections
-      SET
-        status = $2,
-        last_verified_at = NOW(),
-        last_error_code = $3,
-        last_error_message = $4,
-        reconnect_required = $5,
-        updated_at = NOW()
-      WHERE connection_id = $1
-      RETURNING
-        connection_id,
-        platform,
-        status AS connection_status,
-        reconnect_required,
-        last_error_code,
-        last_error_message,
-        last_verified_at,
-        updated_at
-    `,
-    [connectionId, status, errorCode ?? null, errorMessage ?? null, Boolean(reconnectRequired)]
-  );
+  const pool =
+    getPool();
 
-  return result.rows[0] ?? null;
+  const status =
+    reconnectRequired
+      ? 'RECONNECT_REQUIRED'
+      : 'ERROR';
+
+
+  const result =
+    await pool.query(
+      `
+        UPDATE
+          social_platform_connections
+
+        SET
+          status =
+            $2,
+
+          last_verified_at =
+            NOW(),
+
+          last_error_code =
+            $3,
+
+          last_error_message =
+            $4,
+
+          reconnect_required =
+            $5,
+
+          updated_at =
+            NOW()
+
+        WHERE
+          connection_id = $1
+
+        RETURNING
+          connection_id,
+          platform,
+          status AS connection_status,
+          reconnect_required,
+          last_error_code,
+          last_error_message,
+          last_verified_at,
+          updated_at
+      `,
+      [
+        connectionId,
+
+        status,
+
+        errorCode ??
+          null,
+
+        errorMessage ??
+          null,
+
+        Boolean(
+          reconnectRequired
+        ),
+      ]
+    );
+
+  return (
+    result.rows[0] ??
+    null
+  );
 }
 
-async function disconnectConnection({ clientId, connectionId }) {
-  const pool = getPool();
-  const result = await pool.query(
-    `
-      UPDATE client_social_connections csc
-      SET is_active = FALSE
-      FROM social_platform_connections spc
-      WHERE csc.connection_id = spc.connection_id
-        AND csc.connection_id = $1
-        AND csc.client_id = $2
-      RETURNING
-        spc.connection_id,
-        csc.client_id,
-        spc.platform,
-        spc.external_account_id,
-        spc.external_account_name,
-        'DISCONNECTED'::varchar AS connection_status,
-        csc.is_active AS client_connection_active,
-        spc.reconnect_required,
-        spc.updated_at
-    `,
-    [connectionId, clientId]
-  );
 
-  return result.rows[0] ?? null;
+// ==========================================================
+// DISCONNECT CLIENT CONNECTION
+// ==========================================================
+
+async function disconnectConnection({
+  clientId,
+  connectionId,
+}) {
+  const pool =
+    getPool();
+
+  const result =
+    await pool.query(
+      `
+        UPDATE
+          client_social_connections csc
+
+        SET
+          is_active = FALSE
+
+        FROM
+          social_platform_connections spc
+
+        WHERE
+          csc.connection_id =
+            spc.connection_id
+
+          AND csc.connection_id =
+            $1
+
+          AND csc.client_id =
+            $2
+
+        RETURNING
+          spc.connection_id,
+          csc.client_id,
+          spc.platform,
+          spc.external_account_id,
+          spc.external_account_name,
+          'DISCONNECTED'::varchar
+            AS connection_status,
+          csc.is_active
+            AS client_connection_active,
+          spc.reconnect_required,
+          spc.updated_at
+      `,
+      [
+        connectionId,
+        clientId,
+      ]
+    );
+
+  return (
+    result.rows[0] ??
+    null
+  );
 }
 
-async function markReauthRequired({ connectionId, message, errorCode = '190' }) {
-  const pool = getPool();
-  const result = await pool.query(
-    `
-      UPDATE social_platform_connections
-      SET
-        status = 'RECONNECT_REQUIRED',
-        reconnect_required = TRUE,
-        last_verified_at = NOW(),
-        last_error_code = $2,
-        last_error_message = $3,
-        updated_at = NOW()
-      WHERE connection_id = $1
-      RETURNING
-        connection_id,
-        platform,
-        status AS connection_status,
-        reconnect_required,
-        last_error_code,
-        last_error_message,
-        updated_at
-    `,
-    [connectionId, String(errorCode), message ?? 'Facebook authorization has expired.']
-  );
 
-  return result.rows[0] ?? null;
+// ==========================================================
+// MARK REAUTH REQUIRED
+// ==========================================================
+
+async function markReauthRequired({
+  connectionId,
+  message,
+  errorCode = 'AUTHORIZATION_EXPIRED',
+}) {
+  const pool =
+    getPool();
+
+  const result =
+    await pool.query(
+      `
+        UPDATE
+          social_platform_connections
+
+        SET
+          status =
+            'RECONNECT_REQUIRED',
+
+          reconnect_required =
+            TRUE,
+
+          last_verified_at =
+            NOW(),
+
+          last_error_code =
+            $2,
+
+          last_error_message =
+            $3,
+
+          updated_at =
+            NOW()
+
+        WHERE
+          connection_id = $1
+
+        RETURNING
+          connection_id,
+          platform,
+          status AS connection_status,
+          reconnect_required,
+          last_error_code,
+          last_error_message,
+          updated_at
+      `,
+      [
+        connectionId,
+
+        String(
+          errorCode
+        ),
+
+        message ??
+          'Platform authorization has expired.',
+      ]
+    );
+
+  return (
+    result.rows[0] ??
+    null
+  );
 }
 
-/* ==========================================================
- * THREADS UPSERT
- * ==========================================================
- *
- * Global account:
- *   social_platform_connections
- *
- * Client relationship:
- *   client_social_connections
- *
- * One Threads account is stored globally by:
- *
- *   platform = THREADS
- *   external_account_id = Threads user ID
- *
- * Only one Threads account is active for a client at a time.
- * ========================================================== */
+
+// ==========================================================
+// THREADS UPSERT
+// ==========================================================
 
 async function upsertThreadsConnection({
   clientId,
@@ -1287,11 +1576,47 @@ async function upsertThreadsConnection({
   permissions = [],
   metadata = {},
 }) {
+  const normalizedClientId =
+    Number(
+      clientId
+    );
+
+  if (
+    !Number.isInteger(
+      normalizedClientId
+    ) ||
+    normalizedClientId <= 0
+  ) {
+    throw new Error(
+      'A valid clientId is required to save a Threads connection.'
+    );
+  }
+
+  if (
+    !externalAccountId
+  ) {
+    throw new Error(
+      'Threads account ID is required.'
+    );
+  }
+
+  if (
+    !encryptedToken ||
+    !iv ||
+    !authTag
+  ) {
+    throw new Error(
+      'Encrypted Threads token data is incomplete.'
+    );
+  }
+
+
   const pool =
     getPool();
 
   const db =
     await pool.connect();
+
 
   try {
     await db.query(
@@ -1299,14 +1624,15 @@ async function upsertThreadsConnection({
     );
 
 
-    /* ------------------------------------------------------
-     * 1. INSERT / UPDATE GLOBAL THREADS ACCOUNT
-     * ------------------------------------------------------ */
+    // ------------------------------------------------------
+    // GLOBAL THREADS ACCOUNT
+    // ------------------------------------------------------
 
     const stored =
       await db.query(
         `
-          INSERT INTO social_platform_connections (
+          INSERT INTO social_platform_connections
+          (
             platform,
 
             external_account_id,
@@ -1339,7 +1665,8 @@ async function upsertThreadsConnection({
             updated_at
           )
 
-          VALUES (
+          VALUES
+          (
             'THREADS',
 
             $1,
@@ -1372,7 +1699,8 @@ async function upsertThreadsConnection({
             NOW()
           )
 
-          ON CONFLICT (
+          ON CONFLICT
+          (
             platform,
             external_account_id
           )
@@ -1433,38 +1761,29 @@ async function upsertThreadsConnection({
           RETURNING *
         `,
         [
-          // $1
           String(
             externalAccountId
           ),
 
-          // $2
           externalAccountName ||
             null,
 
-          // $3
           encryptedToken,
 
-          // $4
           iv,
 
-          // $5
           authTag,
 
-          // $6
           tokenExpiresAt,
 
-          // $7
           JSON.stringify(
             permissions || []
           ),
 
-          // $8
           JSON.stringify(
             metadata || {}
           ),
 
-          // $9
           connectedBy ??
             null,
         ]
@@ -1482,18 +1801,20 @@ async function upsertThreadsConnection({
     }
 
 
-    /* ------------------------------------------------------
-     * 2. DISABLE OTHER THREADS ACCOUNTS FOR THIS CLIENT
-     * ------------------------------------------------------ */
+    // ------------------------------------------------------
+    // ONE ACTIVE THREADS ACCOUNT PER CLIENT
+    // ------------------------------------------------------
 
     await db.query(
       `
-        UPDATE client_social_connections csc
+        UPDATE
+          client_social_connections csc
 
         SET
           is_active = FALSE
 
-        FROM social_platform_connections spc
+        FROM
+          social_platform_connections spc
 
         WHERE
           csc.connection_id =
@@ -1509,42 +1830,546 @@ async function upsertThreadsConnection({
             $2
       `,
       [
-        clientId,
+        normalizedClientId,
         connectionRow.connection_id,
       ]
     );
 
 
-    /* ------------------------------------------------------
-     * 3. LINK / REACTIVATE CLIENT
-     * ------------------------------------------------------ */
+    // ------------------------------------------------------
+    // CLIENT ↔ THREADS CONNECTION
+    // ------------------------------------------------------
 
     await db.query(
       `
-        INSERT INTO client_social_connections (
+        INSERT INTO client_social_connections
+        (
           client_id,
           connection_id,
           is_active,
           created_at
         )
 
-        VALUES (
+        VALUES
+        (
           $1,
           $2,
           TRUE,
           NOW()
         )
 
-        ON CONFLICT (
+        ON CONFLICT
+        (
           client_id,
           connection_id
         )
 
         DO UPDATE SET
-          is_active = TRUE
+
+          is_active =
+            TRUE
       `,
       [
-        clientId,
+        normalizedClientId,
+        connectionRow.connection_id,
+      ]
+    );
+
+
+    await db.query(
+      'COMMIT'
+    );
+
+
+    return {
+      ...connectionRow,
+
+      client_id:
+        normalizedClientId,
+
+      client_connection_active:
+        true,
+
+      connection_status:
+        connectionRow.status,
+    };
+
+  } catch (error) {
+    await db.query(
+      'ROLLBACK'
+    );
+
+    throw error;
+
+  } finally {
+    db.release();
+  }
+}
+
+
+// ==========================================================
+// X UPSERT
+// ==========================================================
+
+async function upsertXConnection({
+  clientId,
+  connectedBy,
+
+  externalAccountId,
+  externalAccountName,
+
+  encryptedToken,
+  iv,
+  authTag,
+
+  refreshTokenEncrypted = null,
+  refreshTokenIv = null,
+  refreshTokenAuthTag = null,
+
+  tokenExpiresAt = null,
+
+  tokenType = 'BEARER',
+
+  permissions = [],
+  metadata = {},
+}) {
+  const normalizedClientId =
+    Number(
+      clientId
+    );
+
+
+  // ------------------------------------------------------
+  // VALIDATE CLIENT
+  // ------------------------------------------------------
+
+  if (
+    !Number.isInteger(
+      normalizedClientId
+    ) ||
+    normalizedClientId <= 0
+  ) {
+    throw new Error(
+      'A valid clientId is required to save an X connection.'
+    );
+  }
+
+
+  // ------------------------------------------------------
+  // VALIDATE X ACCOUNT
+  // ------------------------------------------------------
+
+  if (
+    !externalAccountId
+  ) {
+    throw new Error(
+      'X external account ID is required.'
+    );
+  }
+
+
+  // ------------------------------------------------------
+  // VALIDATE ACCESS TOKEN ENCRYPTION
+  // ------------------------------------------------------
+
+  if (
+    !encryptedToken ||
+    !iv ||
+    !authTag
+  ) {
+    throw new Error(
+      'Encrypted X access token data is incomplete.'
+    );
+  }
+
+
+  /*
+   * Refresh token is optional because X may not return one
+   * if offline.access was not granted.
+   *
+   * However, when refresh-token data exists, all three
+   * encryption fields must exist.
+   */
+
+  const hasAnyRefreshTokenField =
+    Boolean(
+      refreshTokenEncrypted ||
+      refreshTokenIv ||
+      refreshTokenAuthTag
+    );
+
+
+  const hasCompleteRefreshToken =
+    Boolean(
+      refreshTokenEncrypted &&
+      refreshTokenIv &&
+      refreshTokenAuthTag
+    );
+
+
+  if (
+    hasAnyRefreshTokenField &&
+    !hasCompleteRefreshToken
+  ) {
+    throw new Error(
+      'Encrypted X refresh token data is incomplete.'
+    );
+  }
+
+
+  const normalizedTokenType =
+    String(
+      tokenType ||
+      'BEARER'
+    )
+      .trim()
+      .toUpperCase();
+
+
+  const pool =
+    getPool();
+
+  const db =
+    await pool.connect();
+
+
+  try {
+    await db.query(
+      'BEGIN'
+    );
+
+
+    // ------------------------------------------------------
+    // 1. STORE / UPDATE GLOBAL X ACCOUNT
+    // ------------------------------------------------------
+
+    const stored =
+      await db.query(
+        `
+          INSERT INTO social_platform_connections
+          (
+            platform,
+
+            external_account_id,
+            external_account_name,
+
+            access_token_encrypted,
+            token_iv,
+            token_auth_tag,
+
+            refresh_token_encrypted,
+            refresh_token_iv,
+            refresh_token_auth_tag,
+
+            token_expires_at,
+            token_type,
+
+            permissions,
+            metadata,
+
+            status,
+
+            connected_by,
+            connected_at,
+
+            verified_at,
+            last_verified_at,
+
+            last_error_code,
+            last_error_message,
+
+            reconnect_required,
+
+            created_at,
+            updated_at
+          )
+
+          VALUES
+          (
+            'X',
+
+            $1,
+            $2,
+
+            $3,
+            $4,
+            $5,
+
+            $6,
+            $7,
+            $8,
+
+            $9,
+            $10,
+
+            $11::jsonb,
+            $12::jsonb,
+
+            'CONNECTED',
+
+            $13,
+            NOW(),
+
+            NOW(),
+            NOW(),
+
+            NULL,
+            NULL,
+
+            FALSE,
+
+            NOW(),
+            NOW()
+          )
+
+
+          ON CONFLICT
+          (
+            platform,
+            external_account_id
+          )
+
+
+          DO UPDATE SET
+
+            external_account_name =
+              EXCLUDED.external_account_name,
+
+
+            access_token_encrypted =
+              EXCLUDED.access_token_encrypted,
+
+
+            token_iv =
+              EXCLUDED.token_iv,
+
+
+            token_auth_tag =
+              EXCLUDED.token_auth_tag,
+
+
+            refresh_token_encrypted =
+              EXCLUDED.refresh_token_encrypted,
+
+
+            refresh_token_iv =
+              EXCLUDED.refresh_token_iv,
+
+
+            refresh_token_auth_tag =
+              EXCLUDED.refresh_token_auth_tag,
+
+
+            token_expires_at =
+              EXCLUDED.token_expires_at,
+
+
+            token_type =
+              EXCLUDED.token_type,
+
+
+            permissions =
+              EXCLUDED.permissions,
+
+
+            metadata =
+              EXCLUDED.metadata,
+
+
+            status =
+              'CONNECTED',
+
+
+            connected_by =
+              EXCLUDED.connected_by,
+
+
+            connected_at =
+              NOW(),
+
+
+            /*
+             * The service verifies /2/users/me before
+             * calling this repository.
+             *
+             * Preserve original verification time.
+             */
+            verified_at =
+              COALESCE(
+                social_platform_connections
+                  .verified_at,
+                NOW()
+              ),
+
+
+            last_verified_at =
+              NOW(),
+
+
+            last_error_code =
+              NULL,
+
+
+            last_error_message =
+              NULL,
+
+
+            reconnect_required =
+              FALSE,
+
+
+            updated_at =
+              NOW()
+
+
+          RETURNING *
+        `,
+        [
+          // $1
+          String(
+            externalAccountId
+          ),
+
+
+          // $2
+          externalAccountName ||
+            null,
+
+
+          // $3
+          encryptedToken,
+
+
+          // $4
+          iv,
+
+
+          // $5
+          authTag,
+
+
+          // $6
+          refreshTokenEncrypted,
+
+
+          // $7
+          refreshTokenIv,
+
+
+          // $8
+          refreshTokenAuthTag,
+
+
+          // $9
+          tokenExpiresAt,
+
+
+          // $10
+          normalizedTokenType,
+
+
+          // $11
+          JSON.stringify(
+            permissions || []
+          ),
+
+
+          // $12
+          JSON.stringify(
+            metadata || {}
+          ),
+
+
+          // $13
+          connectedBy ??
+            null,
+        ]
+      );
+
+
+    const connectionRow =
+      stored.rows[0];
+
+
+    if (
+      !connectionRow
+    ) {
+      throw new Error(
+        'X connection could not be stored.'
+      );
+    }
+
+
+    // ------------------------------------------------------
+    // 2. DISABLE OTHER X ACCOUNTS FOR THIS CLIENT
+    // ------------------------------------------------------
+
+    await db.query(
+      `
+        UPDATE
+          client_social_connections csc
+
+        SET
+          is_active = FALSE
+
+        FROM
+          social_platform_connections spc
+
+        WHERE
+          csc.connection_id =
+            spc.connection_id
+
+          AND csc.client_id =
+            $1
+
+          AND spc.platform =
+            'X'
+
+          AND csc.connection_id <>
+            $2
+      `,
+      [
+        normalizedClientId,
+        connectionRow.connection_id,
+      ]
+    );
+
+
+    // ------------------------------------------------------
+    // 3. LINK / REACTIVATE X ACCOUNT FOR CLIENT
+    // ------------------------------------------------------
+
+    await db.query(
+      `
+        INSERT INTO client_social_connections
+        (
+          client_id,
+          connection_id,
+          is_active,
+          created_at
+        )
+
+        VALUES
+        (
+          $1,
+          $2,
+          TRUE,
+          NOW()
+        )
+
+        ON CONFLICT
+        (
+          client_id,
+          connection_id
+        )
+
+        DO UPDATE SET
+
+          is_active =
+            TRUE
+      `,
+      [
+        normalizedClientId,
         connectionRow.connection_id,
       ]
     );
@@ -1556,14 +2381,18 @@ async function upsertThreadsConnection({
 
 
     /*
-     * Return the same safe shape used
-     * by the other normalized upserts.
+     * Sensitive token columns are intentionally not copied
+     * into a special public object here.
+     *
+     * The service layer must sanitize this before returning
+     * anything to React.
      */
+
     return {
       ...connectionRow,
 
       client_id:
-        clientId,
+        normalizedClientId,
 
       client_connection_active:
         true,
@@ -1573,7 +2402,6 @@ async function upsertThreadsConnection({
     };
 
   } catch (error) {
-
     await db.query(
       'ROLLBACK'
     );
@@ -1581,10 +2409,14 @@ async function upsertThreadsConnection({
     throw error;
 
   } finally {
-
     db.release();
   }
 }
+
+
+// ==========================================================
+// EXPORTS
+// ==========================================================
 
 module.exports = {
   findByClientId,
@@ -1594,6 +2426,8 @@ module.exports = {
   upsertFacebookConnection,
   upsertInstagramConnection,
   upsertTelegramConnection,
+  upsertThreadsConnection,
+  upsertXConnection,
 
   markVerified,
   markVerificationFailed,

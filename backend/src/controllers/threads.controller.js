@@ -14,10 +14,27 @@ function getUserId(user) {
 }
 
 function getClientId(req) {
-  return Number(
-    req.clientId ??
-    req.params?.clientId
-  );
+  const routeClientId =
+    Number(req.params?.clientId);
+
+  if (
+    Number.isInteger(routeClientId) &&
+    routeClientId > 0
+  ) {
+    return routeClientId;
+  }
+
+  const middlewareClientId =
+    Number(req.clientId);
+
+  if (
+    Number.isInteger(middlewareClientId) &&
+    middlewareClientId > 0
+  ) {
+    return middlewareClientId;
+  }
+
+  return null;
 }
 
 function saveSession(req) {

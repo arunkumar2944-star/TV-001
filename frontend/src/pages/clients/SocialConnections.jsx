@@ -53,6 +53,26 @@ import {
   testYouTubeConnection,
 } from '../../services/youtubeConnections.api.js';
 
+import {
+  getXOAuthResult,
+  getXOAuthStartUrl,
+  testXConnection,
+} from '../../services/xConnections.api.js';
+
+
+import {
+  connectWhatsAppEmbeddedSignup,
+  connectWhatsAppTestNumber,
+  getWhatsAppEmbeddedSignupConfig,
+  testWhatsAppConnection,
+
+} from '../../services/whatsappConnections.api.js';
+
+import {
+  launchWhatsAppEmbeddedSignup,
+  loadFacebookSdk,
+} from '../../services/whatsappEmbeddedSignup.js';
+
 import { formatDateTime } from '../../utils/format.js';
 import { getConnectionUiState } from '../../utils/socialConnectionState.js';
 import './social-connections.css';
@@ -62,8 +82,8 @@ import './social-connections.css';
 // PLATFORM CONFIGURATION
 // =====================================================
 //
-// Facebook, Instagram, Telegram, Threads, and YouTube are currently implemented.
-// Remaining platforms stay visible as roadmap items until
+// Facebook, Instagram, WhatsApp, Telegram, YouTube, X, and Threads are currently implemented.
+// Any remaining platforms stay visible as roadmap items until
 // their backend integrations are completed.
 // =====================================================
 
@@ -90,7 +110,7 @@ const PLATFORM_CONFIG = [
     description:
       'WhatsApp Business publishing integration.',
     icon: FaWhatsapp,
-    available: false,
+    available: true,
   },
   {
     code: 'youtube',
@@ -112,9 +132,9 @@ const PLATFORM_CONFIG = [
     code: 'x',
     name: 'X',
     description:
-      'X account publishing integration.',
+      'Connect an X account for approved content publishing and automation.',
     icon: FaXTwitter,
-    available: false,
+    available: true,
   },
   {
     code: 'threads',
@@ -249,6 +269,11 @@ function getAccountTypeLabel(
     case 'threads':
       return 'Threads account';
 
+    case 'x':
+      return 'X account';
+
+    case 'whatsapp':
+      return 'WhatsApp Business phone number';
     default:
       return 'Connected account';
   }
@@ -371,6 +396,15 @@ export default function SocialConnections() {
     setShowTelegramToken,
   ] = useState(false);
 
+  const [
+    whatsappSignupConfig,
+    setWhatsAppSignupConfig,
+  ] = useState(null);
+
+  const [
+    whatsappSdkReady,
+    setWhatsAppSdkReady,
+  ] = useState(false);
   // ===================================================
   // LOAD ACTIVE CLIENT + CONNECTIONS
   // ===================================================
@@ -448,8 +482,264 @@ export default function SocialConnections() {
       },
       [],
     );
+  // ===================================================
+  // PREPARE WHATSAPP EMBEDDED SIGNUP
+  // ===================================================
+
+  useEffect(() => {
+    let active =
+      true;
 
 
+    async function prepareWhatsApp() {
+      const enabled =
+        getClientEnabledPlatforms(
+          client,
+        );
+
+
+      if (
+        !enabled.includes(
+          'whatsapp',
+        )
+      ) {
+        return;
+      }
+
+
+      try {
+        const config =
+          await getWhatsAppEmbeddedSignupConfig();
+
+
+        if (!active) {
+          return;
+        }
+
+
+        setWhatsAppSignupConfig(
+          config,
+        );
+
+
+        await loadFacebookSdk({
+          appId:
+            config.appId,
+
+          graphVersion:
+            config.graphVersion,
+        });
+
+
+        if (!active) {
+          return;
+        }
+
+
+        setWhatsAppSdkReady(
+          true,
+        );
+
+      } catch (sdkError) {
+        if (!active) {
+          return;
+        }
+
+
+        setWhatsappSdkReadySafe(
+          false,
+        );
+
+
+        setError(
+          getErrorMessage(
+            sdkError,
+            'WhatsApp Embedded Signup could not be initialized.',
+          ),
+        );
+      }
+    }
+
+
+    function setWhatsappSdkReadySafe(
+      value,
+    ) {
+      if (active) {
+        setWhatsAppSdkReady(
+          value,
+        );
+      }
+    }
+
+
+    if (client) {
+      void prepareWhatsApp();
+    }
+
+
+    return () => {
+      active =
+        false;
+    };
+  }, [client]);
+
+  // ===================================================
+  // WHATSAPP CONNECT / RECONNECT
+  // ===================================================
+
+  const beginWhatsAppEmbeddedSignup =
+    useCallback(
+      async () => {
+        if (
+          !whatsappSignupConfig
+        ) {
+          setError(
+            'WhatsApp Embedded Signup configuration is not ready.',
+          );
+
+          return;
+        }
+
+
+        if (
+          !whatsappSdkReady ||
+          !window.FB
+        ) {
+          setError(
+            'Meta login is still loading. Please try again in a moment.',
+          );
+
+          return;
+        }
+
+
+        try {
+          setBusyAction(
+            'whatsapp-connect',
+          );
+
+          setError('');
+          setNotice('');
+
+
+          /*
+           * launchWhatsAppEmbeddedSignup()
+           * invokes FB.login synchronously before
+           * waiting for Meta results.
+           */
+          const signup =
+            await launchWhatsAppEmbeddedSignup({
+              configurationId:
+                whatsappSignupConfig
+                  .configurationId,
+            });
+
+
+          const connection =
+            await connectWhatsAppEmbeddedSignup({
+              code:
+                signup.code,
+
+              wabaId:
+                signup.wabaId,
+
+              phoneNumberId:
+                signup.phoneNumberId,
+            });
+
+
+          const name =
+            connection
+              ?.externalAccountName ||
+            connection
+              ?.phone
+              ?.verifiedName ||
+            connection
+              ?.phone
+              ?.displayPhoneNumber ||
+            'WhatsApp Business number';
+
+
+          setNotice(
+            `${name} is connected and verified.`,
+          );
+
+
+          await loadWorkspace();
+
+        } catch (whatsappError) {
+          setError(
+            getErrorMessage(
+              whatsappError,
+              'WhatsApp Business connection could not be completed.',
+            ),
+          );
+        } finally {
+          setBusyAction('');
+        }
+      },
+      [
+        loadWorkspace,
+        whatsappSdkReady,
+        whatsappSignupConfig,
+      ],
+    );
+
+async function beginWhatsAppTestConnection() {
+  try {
+    setBusyAction(
+      'whatsapp-connect'
+    );
+
+    setError('');
+    setNotice('');
+
+
+    const result =
+      await connectWhatsAppTestNumber();
+
+
+    if (
+      !result ||
+      String(
+        result.status || ''
+      ).toUpperCase() !==
+        'CONNECTED'
+    ) {
+      throw new Error(
+        'WhatsApp test connection did not return CONNECTED status.'
+      );
+    }
+
+
+    const accountName =
+      result.externalAccountName ||
+      result.phone
+        ?.verifiedName ||
+      result.phone
+        ?.displayPhoneNumber ||
+      'WhatsApp Cloud API test number';
+
+
+    setNotice(
+      `${accountName} is connected and verified.`
+    );
+
+
+    await loadWorkspace();
+
+  } catch (connectError) {
+    setError(
+      getErrorMessage(
+        connectError,
+        'WhatsApp Cloud API test number could not be connected.'
+      )
+    );
+
+  } finally {
+    setBusyAction('');
+  }
+}
   // ===================================================
   // FACEBOOK PAGE PICKER
   // ===================================================
@@ -772,6 +1062,64 @@ export default function SocialConnections() {
 
 
       // -----------------------------------------------
+      // X OAUTH RESULT
+      // -----------------------------------------------
+
+      if (
+        enabledPlatforms.includes(
+          'x',
+        )
+      ) {
+        try {
+          const xOutcome =
+            await getXOAuthResult();
+
+          if (!active) {
+            return;
+          }
+
+          if (
+            xOutcome
+              ?.status ===
+            'CONNECTED'
+          ) {
+            setNotice(
+              xOutcome
+                .message ||
+              'X is connected and verified.',
+            );
+
+            await loadWorkspace();
+          } else if (
+            xOutcome
+              ?.status ===
+            'ERROR'
+          ) {
+            setError(
+              xOutcome
+                .message ||
+              'X authorization could not be completed.',
+            );
+          }
+        } catch (xError) {
+          if (active) {
+            setError(
+              getErrorMessage(
+                xError,
+                'Unable to read the X connection result.',
+              ),
+            );
+          }
+        }
+      }
+
+
+      if (!active) {
+        return;
+      }
+
+
+      // -----------------------------------------------
       // THREADS OAUTH RESULT
       // -----------------------------------------------
 
@@ -1075,6 +1423,77 @@ export default function SocialConnections() {
 
 
   // ===================================================
+  // START X OAUTH / RECONNECT
+  // ===================================================
+
+ const beginXOAuth =
+  useCallback(
+    async () => {
+      try {
+        setBusyAction(
+          'x-oauth'
+        );
+
+        setError('');
+        setNotice('');
+
+
+        const authorizationUrl =
+          await getXOAuthStartUrl();
+
+
+        if (!authorizationUrl) {
+          throw new Error(
+            'X authorization URL was not returned by the server.'
+          );
+        }
+
+
+        window.location.assign(
+          authorizationUrl
+        );
+
+      } catch (xError) {
+        console.error(
+          'X OAuth start failed:',
+          xError
+        );
+
+
+        const message =
+          getErrorMessage(
+            xError,
+            'Unable to start X authorization.'
+          );
+
+
+        setError(
+          message
+        );
+
+
+        setBusyAction('');
+
+
+        /*
+         * Error alert is at the top of the page.
+         * Scroll there so the user sees it.
+         */
+        window.requestAnimationFrame(
+          () => {
+            window.scrollTo({
+              top: 0,
+              behavior:
+                'smooth',
+            });
+          }
+        );
+      }
+    },
+    []
+  );
+
+  // ===================================================
   // TELEGRAM CONNECT / RECONNECT
   // ===================================================
 
@@ -1095,10 +1514,10 @@ export default function SocialConnections() {
             ?.connection
             ?.externalAccountId
             ? String(
-                platform
-                  .connection
-                  .externalAccountId,
-              )
+              platform
+                .connection
+                .externalAccountId,
+            )
             : '',
         );
 
@@ -1223,77 +1642,197 @@ export default function SocialConnections() {
   // ===================================================
 
   const handleVerify =
-    useCallback(
-      async (platform) => {
-        const connectionId =
-          platform.connection
-            ?.connectionId;
+  useCallback(
+    async (platform) => {
+      const connectionId =
+        platform.connection
+          ?.connectionId;
 
-        if (!connectionId) {
-          return;
-        }
 
-        try {
-          setBusyAction(
-            `verify-${connectionId}`,
-          );
+      if (!connectionId) {
+        setError(
+          `${platform.name} connection ID is missing.`
+        );
 
-          setError('');
-          setNotice('');
+        window.scrollTo({
+          top: 0,
+          behavior: 'smooth',
+        });
 
-          if (
-            platform.code ===
-            'threads'
-          ) {
-            const clientId =
-              getClientId(client);
+        return;
+      }
 
-            if (!clientId) {
-              throw new Error(
-                'A valid active client is required to test Threads.',
-              );
-            }
 
+      try {
+        setBusyAction(
+          `verify-${connectionId}`
+        );
+
+        setError('');
+        setNotice('');
+
+
+        let result = null;
+
+
+        // ===============================================
+        // THREADS
+        // ===============================================
+
+        if (
+          platform.code ===
+          'threads'
+        ) {
+          const clientId =
+            getClientId(
+              client
+            );
+
+
+          if (!clientId) {
+            throw new Error(
+              'A valid active client is required to test Threads.'
+            );
+          }
+
+
+          result =
             await testThreadsConnection({
               clientId,
               connectionId,
             });
-          } else if (
-            platform.code ===
-            'youtube'
-          ) {
+        }
+
+
+        // ===============================================
+        // X
+        // ===============================================
+
+        else if (
+          platform.code ===
+          'x'
+        ) {
+          result =
+            await testXConnection({
+              connectionId,
+            });
+        }
+
+
+        // ===============================================
+        // YOUTUBE
+        // ===============================================
+
+        else if (
+          platform.code ===
+          'youtube'
+        ) {
+          result =
             await testYouTubeConnection({
               connectionId,
             });
-          } else {
-            await verifySocialConnection(
-              connectionId,
-            );
-          }
-
-          setNotice(
-            `${platform.name} connection verified successfully.`,
-          );
-
-          await loadWorkspace();
-        } catch (verifyError) {
-          setError(
-            getErrorMessage(
-              verifyError,
-              `${platform.name} verification failed.`,
-            ),
-          );
-
-          await loadWorkspace();
-        } finally {
-          setBusyAction('');
         }
-      },
-      [
-        client,
-        loadWorkspace,
-      ],
-    );
+
+
+        // ===============================================
+        // WHATSAPP
+        // ===============================================
+
+        else if (
+          platform.code ===
+          'whatsapp'
+        ) {
+          result =
+            await testWhatsAppConnection({
+              connectionId,
+            });
+        }
+
+
+        // ===============================================
+        // FACEBOOK / TELEGRAM / OTHER GENERIC
+        // ===============================================
+
+        else {
+          result =
+            await verifySocialConnection(
+              connectionId
+            );
+        }
+
+
+        // ===============================================
+        // SUCCESS MESSAGE
+        // ===============================================
+
+        const successMessage =
+          result?.message ||
+          result?.data?.message ||
+          `${platform.name} connection verified successfully.`;
+
+
+        setNotice(
+          successMessage
+        );
+
+
+        await loadWorkspace();
+
+
+        /*
+         * Alert is located near the top of
+         * Social Connections page.
+         *
+         * Make the success message visible
+         * after clicking Test connection.
+         */
+        window.requestAnimationFrame(
+          () => {
+            window.scrollTo({
+              top: 0,
+              behavior:
+                'smooth',
+            });
+          }
+        );
+
+      } catch (verifyError) {
+        console.error(
+          `${platform.name} verification failed:`,
+          verifyError
+        );
+
+
+        setError(
+          getErrorMessage(
+            verifyError,
+            `${platform.name} verification failed.`
+          )
+        );
+
+
+        await loadWorkspace();
+
+
+        window.requestAnimationFrame(
+          () => {
+            window.scrollTo({
+              top: 0,
+              behavior:
+                'smooth',
+            });
+          }
+        );
+
+      } finally {
+        setBusyAction('');
+      }
+    },
+    [
+      client,
+      loadWorkspace,
+    ]
+  );
 
 
   // ===================================================
@@ -2050,20 +2589,150 @@ export default function SocialConnections() {
                         )}
 
                         {connected && (
+
+                          <>
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={() =>
+                                handleVerify(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `verify-${connectionId}`
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              {busyAction ===
+                                `verify-${connectionId}`
+                                ? 'Verifying…'
+                                : 'Test connection'}
+                            </button>
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={
+                                beginInstagramOAuth
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              Change / reconnect
+                            </button>
+                          </>
+                        )}
+
+                        {platform.connection &&
+                          clientConnectionActive && (
+                            <button
+                              type="button"
+                              className="social-button social-button--danger"
+                              onClick={() =>
+                                handleDisconnect(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `disconnect-${connectionId}`
+                              }
+                            >
+                              {busyAction ===
+                                `disconnect-${connectionId}`
+                                ? 'Disconnecting…'
+                                : 'Disconnect'}
+                            </button>
+                          )}
+                      </>
+                    )}
+                  {/* WHATSAPP */}
+
+                  {platform.code ===
+                    'whatsapp' && (
+                      <>
+                        {reconnect && (
                           <button
                             type="button"
-                            className="social-button social-button--secondary"
+                            className="social-button social-button--primary"
                             onClick={
-                              beginInstagramOAuth
+                              beginWhatsAppTestConnection
+                            }
+                            disabled={
+                              busyAction ===
+                              'whatsapp-connect' ||
+                              !whatsappSdkReady
                             }
                           >
-                            <FaRotate />
+                            <FaWhatsapp />
 
                             {' '}
 
-                            Change / reconnect
+                            {busyAction ===
+                              'whatsapp-connect'
+                              ? 'Connecting…'
+                              : !whatsappSdkReady
+                                ? 'Preparing Meta…'
+                                : platform.connection
+                                  ? 'Reconnect WhatsApp'
+                                  : 'Connect WhatsApp'}
                           </button>
                         )}
+
+
+                        {connected && (
+                          <>
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={() =>
+                                handleVerify(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `verify-${connectionId}`
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              {busyAction ===
+                                `verify-${connectionId}`
+                                ? 'Verifying…'
+                                : 'Test connection'}
+                            </button>
+
+
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={
+                                beginWhatsAppEmbeddedSignup
+                              }
+                              disabled={
+                                busyAction ===
+                                'whatsapp-connect' ||
+                                !whatsappSdkReady
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              Change / reconnect
+                            </button>
+                          </>
+                        )}
+
 
                         {platform.connection &&
                           clientConnectionActive && (
@@ -2279,6 +2948,109 @@ export default function SocialConnections() {
                           )}
                       </>
                     )}
+
+                  {/* X */}
+
+                  {platform.code ===
+                    'x' && (
+                      <>
+                        {reconnect && (
+                          <button
+                            type="button"
+                            className="social-button social-button--primary"
+                            onClick={
+                              beginXOAuth
+                            }
+                            disabled={
+                              busyAction ===
+                              'x-oauth'
+                            }
+                          >
+                            <FaXTwitter />
+
+                            {' '}
+
+                            {busyAction ===
+                              'x-oauth'
+                              ? 'Opening X…'
+                              : platform.connection
+                                ? 'Reconnect X'
+                                : 'Connect X'}
+                          </button>
+                        )}
+
+                        {connected && (
+                          <>
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={() =>
+                                handleVerify(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `verify-${connectionId}`
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              {busyAction ===
+                                `verify-${connectionId}`
+                                ? 'Verifying…'
+                                : 'Test connection'}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="social-button social-button--secondary"
+                              onClick={
+                                beginXOAuth
+                              }
+                              disabled={
+                                busyAction ===
+                                'x-oauth'
+                              }
+                            >
+                              <FaRotate />
+
+                              {' '}
+
+                              {busyAction ===
+                                'x-oauth'
+                                ? 'Opening X…'
+                                : 'Change / reconnect'}
+                            </button>
+                          </>
+                        )}
+
+                        {platform.connection &&
+                          clientConnectionActive && (
+                            <button
+                              type="button"
+                              className="social-button social-button--danger"
+                              onClick={() =>
+                                handleDisconnect(
+                                  platform,
+                                )
+                              }
+                              disabled={
+                                busyAction ===
+                                `disconnect-${connectionId}`
+                              }
+                            >
+                              {busyAction ===
+                                `disconnect-${connectionId}`
+                                ? 'Disconnecting…'
+                                : 'Disconnect'}
+                            </button>
+                          )}
+                      </>
+                    )}
+
 
                   {/* THREADS */}
 

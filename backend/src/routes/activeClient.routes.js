@@ -41,12 +41,12 @@ const facebookController =
     '../controllers/facebook.controller'
   );
 
-  const telegramController =
+const telegramController =
   require(
     '../controllers/telegram.controller'
   );
 
-  const threadsController =
+const threadsController =
   require(
     '../controllers/threads.controller'
   );
@@ -56,6 +56,17 @@ const {
   testYouTubeConnection,
 } = require(
   '../controllers/youtube.controller'
+);
+
+const {
+  getWhatsAppConfig,
+  connectWhatsApp,
+  connectWhatsAppTestNumber,
+  getWhatsAppResult,
+  testWhatsAppConnection,
+
+} = require(
+  '../controllers/whatsapp.controller'
 );
 const router =
   express.Router();
@@ -175,7 +186,7 @@ router.put(
 
 router.get(
   '/social-connections/youtube/oauth/start',
-   authenticate,
+  authenticate,
   requireActiveClient,
   startYouTubeOAuth
 );
@@ -187,7 +198,7 @@ router.get(
 
 router.get(
   '/social-connections/youtube/oauth/result',
-   authenticate,
+  authenticate,
   requireActiveClient,
   getYouTubeOAuthResult
 );
@@ -199,9 +210,92 @@ router.get(
 
 router.post(
   '/social-connections/youtube/:connectionId/test',
-   authenticate,
+  authenticate,
   requireActiveClient,
   testYouTubeConnection
+);
+
+
+// ======================================================
+// WHATSAPP EMBEDDED SIGNUP CONFIG
+// ======================================================
+//
+// Final URL:
+// GET /api/client/social-connections/whatsapp/config
+//
+// Returns browser-safe values only:
+// - Meta App ID
+// - Embedded Signup Configuration ID
+// - Graph API version
+//
+// Never returns META_APP_SECRET.
+// ======================================================
+
+router.get(
+  '/social-connections/whatsapp/config',
+  authenticate,
+  requireActiveClient,
+  getWhatsAppConfig
+);
+
+
+// ======================================================
+// WHATSAPP CONNECT / RECONNECT
+// ======================================================
+//
+// Final URL:
+// POST /api/client/social-connections/whatsapp/connect
+//
+// Body:
+// {
+//   code,
+//   wabaId,
+//   phoneNumberId
+// }
+// ======================================================
+
+router.post(
+  '/social-connections/whatsapp/connect',
+  authenticate,
+  requireActiveClient,
+  connectWhatsApp
+);
+
+
+// ======================================================
+// WHATSAPP EMBEDDED SIGNUP RESULT
+// ======================================================
+//
+// Final URL:
+// GET /api/client/social-connections/whatsapp/result
+// ======================================================
+
+router.get(
+  '/social-connections/whatsapp/result',
+  authenticate,
+  requireActiveClient,
+  getWhatsAppResult
+);
+
+router.post(
+  '/social-connections/whatsapp/test-connect',
+  connectWhatsAppTestNumber
+);
+
+// ======================================================
+// WHATSAPP TEST CONNECTION
+// ======================================================
+//
+// Final URL:
+// POST
+// /api/client/social-connections/whatsapp/:connectionId/test
+// ======================================================
+
+router.post(
+  '/social-connections/whatsapp/:connectionId/test',
+  authenticate,
+  requireActiveClient,
+  testWhatsAppConnection
 );
 // ======================================================
 // GET CLIENT ONBOARDING PROGRESS
